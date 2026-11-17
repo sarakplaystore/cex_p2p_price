@@ -7,6 +7,7 @@ export const EXCHANGES = [
 
 export type ExchangeId = (typeof EXCHANGES)[number]["id"];
 export type FiatCurrency = "USD" | "KHR";
+export const DEFAULT_FIAT: FiatCurrency = "USD";
 export type P2PSide = "buy" | "sell";
 export type QuoteStatus = "live" | "empty" | "error";
 

@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. The dashboard refreshes every 30 seconds; use the USD/KHR selector to change the fiat market. No API keys or environment variables are required.
+Open <http://localhost:3000>. The dashboard starts with USD selected and refreshes every 30 seconds; use the USD/KHR selector to change the fiat market. No API keys or environment variables are required.
 
 ```bash
 npm test
