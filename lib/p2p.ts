@@ -14,7 +14,6 @@ export type QuoteStatus = "live" | "empty" | "error";
 export const INITIAL_MERCHANT_LIMIT = 2;
 export const MERCHANTS_PER_SHOW_MORE = 2;
 export const MAX_MERCHANTS_PER_SIDE = 20;
-export const USD_OFFER_PRICE_RANGE = { min: 0.9, max: 1.015 } as const;
 
 export interface P2POffer {
   id: string;
@@ -48,62 +47,14 @@ export interface ExchangeQuote {
 export interface QuotesPayload {
   asset: "USDT";
   fiat: FiatCurrency;
-  paymentMethod: "ABA Bank";
+  paymentMethod: "all";
   updatedAt: string;
   refreshAfterSeconds: number;
   exchanges: ExchangeQuote[];
 }
 
-/** Match a clearly named ABA payment method; do not treat other banks as ABA. */
-export function hasAbaBankPayment(paymentMethods: string[]): boolean {
-  return paymentMethods.some((method) => /(^|[^a-z])aba([^a-z]|$)/i.test(method));
-}
-
 /**
- * Maker sells USDT on the dashboard's Buy side. Apply the USD guard only to
- * those offers; KHR prices and maker-buy offers use different price scales.
- */
-export function isWithinMakerSellPriceRange(offer: P2POffer): boolean {
-  const makerSide = offer.side === "buy" ? "sell" : "buy";
-  if (offer.fiat !== "USD" || makerSide !== "sell") return true;
-  return offer.price >= USD_OFFER_PRICE_RANGE.min && offer.price <= USD_OFFER_PRICE_RANGE.max;
-}
-
-export const DEFAULT_BLOCKED_MERCHANTS = [
-  "KingXchanger001",
-  "Localcambodiapayeer",
-] as const;
-export const MAX_BLOCKED_MERCHANTS = 50;
-const MAX_BLOCKED_MERCHANT_NAME_LENGTH = 80;
-
-/** Trim, deduplicate case-insensitively, and bound browser/API blocklist input. */
-export function normalizeBlockedMerchantNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of value) {
-    if (typeof candidate !== "string") continue;
-    const name = candidate.trim();
-    if (!name || name.length > MAX_BLOCKED_MERCHANT_NAME_LENGTH) continue;
-
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    names.push(name);
-    if (names.length === MAX_BLOCKED_MERCHANTS) break;
-  }
-  return names;
-}
-
-/** Match merchant names exactly, ignoring surrounding spaces and letter case. */
-export function isMerchantBlocked(offer: P2POffer, blockedNames: readonly string[]): boolean {
-  const merchantName = offer.merchantName.trim().toLowerCase();
-  return blockedNames.some((name) => name.trim().toLowerCase() === merchantName);
-}
-
-/**
- * Filter to ABA-only offers, rank best price first, and keep one ad per trader.
+ * Rank all valid offers by best price and keep one ad per trader.
  * For a user buying USDT, lower is better; for a user selling USDT, higher is better.
  */
 export function selectTopMerchants(
@@ -112,12 +63,7 @@ export function selectTopMerchants(
   limit = INITIAL_MERCHANT_LIMIT,
 ): P2POffer[] {
   const ranked = offers
-    .filter(
-      (offer) =>
-        Number.isFinite(offer.price) &&
-        offer.price > 0 &&
-        hasAbaBankPayment(offer.paymentMethods),
-    )
+    .filter((offer) => Number.isFinite(offer.price) && offer.price > 0)
     .slice()
     .sort((left, right) => {
       const priceOrder =

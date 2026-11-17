@@ -1,9 +1,4 @@
 import {
-  DEFAULT_BLOCKED_MERCHANTS,
-  hasAbaBankPayment,
-  INITIAL_MERCHANT_LIMIT,
-  isMerchantBlocked,
-  isWithinMakerSellPriceRange,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -212,13 +207,6 @@ export function normalizeOffer(
   };
 }
 
-function rowsContainAba(rows: JsonRecord[], exchange: ExchangeId, side: P2PSide, fiat: FiatCurrency): boolean {
-  return rows.some((row) => {
-    const offer = normalizeOffer(row, exchange, side, fiat);
-    return offer !== null && hasAbaBankPayment(offer.paymentMethods);
-  });
-}
-
 function hasPrice(value: unknown): value is JsonRecord {
   if (!isRecord(value)) return false;
   const records = nestedRecords(value);
@@ -314,17 +302,13 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
 
 const binanceUrl = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
-async function requestBinance(
-  side: P2PSide,
-  fiat: FiatCurrency,
-  payTypes: string[],
-): Promise<JsonRecord[]> {
+async function requestBinance(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
   const payload = await postJson(
     binanceUrl,
     {
       page: 1,
       rows: 20,
-      payTypes,
+      payTypes: [],
       asset: "USDT",
       tradeType: side === "buy" ? "BUY" : "SELL",
       fiat,
@@ -344,28 +328,8 @@ async function requestBinance(
 }
 
 async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  let firstRows: JsonRecord[] | null = null;
-  let firstError: unknown;
-
-  try {
-    firstRows = await requestBinance(side, fiat, ["ABA Bank"]);
-    if (rowsContainAba(firstRows, "binance", side, fiat)) return firstRows;
-  } catch (error) {
-    firstError = error;
-  }
-
-  // Binance's public API has used different values for its payment filter over
-  // time. Retry without that hint, then apply our own strict ABA-name filter.
-  try {
-    return await requestBinance(side, fiat, []);
-  } catch (fallbackError) {
-    if (firstRows) return firstRows;
-    throw fallbackError ?? firstError;
-  }
+  return requestBinance(side, fiat);
 }
-
-// OKX returns 20 ads per page; cap pagination at 100 ads to bound request volume.
-const OKX_MAX_PAGES = 5;
 
 export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
   const apiSide = side === "buy" ? "sell" : "buy";
@@ -375,7 +339,7 @@ export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
   return rows.filter(isRecord);
 }
 
-async function requestOkx(side: P2PSide, fiat: FiatCurrency, currentPage = 1): Promise<JsonRecord[]> {
+async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
   const apiSide = side === "buy" ? "sell" : "buy";
   const params = new URLSearchParams({
     side: apiSide,
@@ -390,7 +354,7 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency, currentPage = 1): P
     limit: "100",
     cryptoCurrency: "USDT",
     fiatCurrency: fiat,
-    currentPage: String(currentPage),
+    currentPage: "1",
     numberPerPage: "20",
     t: String(Date.now()),
   });
@@ -411,8 +375,8 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency, currentPage = 1): P
   return extractOkxRows(payload, side);
 }
 
-async function okxRows(side: P2PSide, fiat: FiatCurrency, currentPage = 1): Promise<JsonRecord[]> {
-  return requestOkx(side, fiat, currentPage);
+async function okxRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+  return requestOkx(side, fiat);
 }
 
 const BYBIT_OFFER_URL = "https://api2.bybit.com/fiat/otc/item/online";
@@ -573,72 +537,17 @@ export async function loadSideQuote(
   exchange: ExchangeId,
   side: P2PSide,
   fiat: FiatCurrency,
-  blockedMerchantNames: readonly string[] = DEFAULT_BLOCKED_MERCHANTS,
 ): Promise<SideQuote> {
   try {
     const rows = await fetchRows(exchange, side, fiat);
     const offers = rows
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
-    const selectEligibleOffers = () =>
-      selectTopMerchants(
-        offers
-          .filter(isWithinMakerSellPriceRange)
-          .filter((offer) => !isMerchantBlocked(offer, blockedMerchantNames)),
-        side,
-        MAX_MERCHANTS_PER_SIDE,
-      );
-    let topOffers = selectEligibleOffers();
-
-    // If exclusions leave fewer than the two cards shown initially, walk later
-    // OKX pages and stop once replacement ABA merchants are available.
-    if (
-      exchange === "okx" &&
-      side === "sell" &&
-      fiat === "USD" &&
-      rows.length > 0 &&
-      topOffers.length < INITIAL_MERCHANT_LIMIT
-    ) {
-      for (let page = 2; page <= OKX_MAX_PAGES; page += 1) {
-        try {
-          const pageRows = await okxRows(side, fiat, page);
-          if (pageRows.length === 0) break;
-
-          offers.push(
-            ...pageRows
-              .map((row) => normalizeOffer(row, exchange, side, fiat))
-              .filter((offer): offer is P2POffer => offer !== null),
-          );
-          topOffers = selectEligibleOffers();
-          if (topOffers.length >= INITIAL_MERCHANT_LIMIT) break;
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : "Unknown OKX pagination error";
-          console.warn(`[P2P Radar] okx ${side} page ${page} failed; using available offers: ${reason}`);
-          break;
-        }
-      }
-    }
-
-    const excludedMakerSellAbaAd = offers.some(
-      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinMakerSellPriceRange(offer),
-    );
-    const excludedBlockedMerchantAbaAd = offers.some(
-      (offer) =>
-        hasAbaBankPayment(offer.paymentMethods) &&
-        isMerchantBlocked(offer, blockedMerchantNames),
-    );
+    const topOffers = selectTopMerchants(offers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
       ? { status: "live", offers: topOffers }
-      : {
-          status: "empty",
-          offers: [],
-          message: excludedMakerSellAbaAd
-            ? "Maker-sell USD ads outside $0.90–$1.015 were excluded."
-            : excludedBlockedMerchantAbaAd
-              ? "No other eligible ABA offers were found after applying the merchant blocklist."
-              : "No verifiable ABA Bank ads found.",
-        };
+      : { status: "empty", offers: [], message: "No valid offers found." };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown exchange error";
     console.warn(`[P2P Radar] ${exchange} ${side} feed failed: ${reason}`);

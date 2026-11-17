@@ -1,13 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  DEFAULT_BLOCKED_MERCHANTS,
   DEFAULT_FIAT,
   EXCHANGES,
-  isMerchantBlocked,
-  MAX_BLOCKED_MERCHANTS,
-  normalizeBlockedMerchantNames,
   INITIAL_MERCHANT_LIMIT,
   MERCHANTS_PER_SHOW_MORE,
   type ExchangeId,
@@ -20,46 +16,6 @@ import {
 } from "@/lib/p2p";
 
 const REFRESH_MS = 30_000;
-const BLOCKLIST_STORAGE_KEY = "p2p-radar-merchant-blocklist-v1";
-const NO_BLOCKED_MERCHANTS: readonly string[] = [];
-
-type MerchantBlocklistSettings = {
-  enabled: boolean;
-  names: string[];
-};
-
-function defaultBlocklistSettings(): MerchantBlocklistSettings {
-  return { enabled: true, names: [...DEFAULT_BLOCKED_MERCHANTS] };
-}
-
-function readBlocklistSettings(): MerchantBlocklistSettings {
-  try {
-    const raw = window.localStorage.getItem(BLOCKLIST_STORAGE_KEY);
-    if (raw === null) return defaultBlocklistSettings();
-
-    const stored: unknown = JSON.parse(raw);
-    if (Array.isArray(stored)) {
-      return { enabled: true, names: normalizeBlockedMerchantNames(stored) };
-    }
-    if (typeof stored !== "object" || stored === null) return defaultBlocklistSettings();
-
-    const settings = stored as { enabled?: unknown; names?: unknown };
-    return {
-      enabled: typeof settings.enabled === "boolean" ? settings.enabled : true,
-      names: normalizeBlockedMerchantNames(settings.names),
-    };
-  } catch {
-    return defaultBlocklistSettings();
-  }
-}
-
-function hideBlockedOffers(quote: SideQuote, blockedNames: readonly string[]): SideQuote {
-  if (quote.status !== "live" || blockedNames.length === 0) return quote;
-  const offers = quote.offers.filter((offer) => !isMerchantBlocked(offer, blockedNames));
-  return offers.length > 0
-    ? { ...quote, offers }
-    : { status: "empty", offers: [], message: "All returned offers are in your merchant blocklist." };
-}
 
 function formatPrice(value: number, fiat: FiatCurrency): string {
   const digits = fiat === "USD" ? 4 : 0;
@@ -118,16 +74,6 @@ function TrendIcon({ direction }: { direction: "up" | "down" }) {
   );
 }
 
-function BankMark() {
-  return (
-    <span className="bank-mark" aria-hidden="true">
-      <svg viewBox="0 0 20 20" fill="none">
-        <path d="m2.5 7 7.5-4 7.5 4M4.5 8.5v6m3.65-6v6m3.7-6v6m3.65-6v6M3 16h14M2 18h16" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
-  );
-}
-
 function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: number; side: P2PSide; fiat: FiatCurrency }) {
   const limit = offer.minFiat !== null || offer.maxFiat !== null
     ? `${offer.minFiat !== null ? formatLimit(offer.minFiat, fiat) : "—"} – ${offer.maxFiat !== null ? formatLimit(offer.maxFiat, fiat) : "—"}`
@@ -136,6 +82,8 @@ function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: numbe
     offer.tradeCount !== null ? `${formatCount(offer.tradeCount)} trades` : null,
     offer.completionRate !== null ? `${Math.round(offer.completionRate)}% completion` : null,
   ].filter(Boolean).join(" · ");
+  const visiblePaymentMethods = offer.paymentMethods.slice(0, 2);
+  const additionalPaymentMethodCount = Math.max(0, offer.paymentMethods.length - visiblePaymentMethods.length);
 
   return (
     <article className={`offer-card ${index === 0 ? "is-best" : ""}`}>
@@ -150,8 +98,15 @@ function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: numbe
         <strong>{formatPrice(offer.price, fiat)}</strong>
         <span>/ USDT</span>
       </div>
-      <div className="offer-meta-line">
-        <span className="aba-tag"><BankMark /> ABA Bank</span>
+      <div className="offer-meta-line" title={offer.paymentMethods.join(", ") || "Payment method not listed"}>
+        {visiblePaymentMethods.length > 0
+          ? visiblePaymentMethods.map((method, methodIndex) => (
+              <span className="payment-method-tag" key={`${method}-${methodIndex}`}>{method}</span>
+            ))
+          : <span className="payment-method-tag is-muted">Payment method not listed</span>}
+        {additionalPaymentMethodCount > 0
+          ? <span className="payment-method-more">+{additionalPaymentMethodCount}</span>
+          : null}
         {offer.verified ? <span className="pro-tag">Verified</span> : null}
       </div>
       <div className="offer-divider" />
@@ -227,83 +182,10 @@ function OfferSide({
       ) : (
         <div className={`empty-state ${quote?.status === "error" ? "is-error" : ""}`}>
           <span className="empty-state-icon">{quote?.status === "error" ? "!" : "—"}</span>
-          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? quote.message ?? "No ABA Bank ads found" : "Waiting for market data"}</p>
-          <span>{quote?.status === "error" ? "Try refreshing in a moment." : "Only verified ABA payment listings are shown."}</span>
+          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? quote.message ?? "No offers found" : "Waiting for market data"}</p>
+          <span>{quote?.status === "error" ? "Try refreshing in a moment." : "All available exchange listings are included."}</span>
         </div>
       )}
-    </section>
-  );
-}
-
-function MerchantBlocklistPanel({
-  settings,
-  onChange,
-}: {
-  settings: MerchantBlocklistSettings;
-  onChange: (settings: MerchantBlocklistSettings) => void;
-}) {
-  const [draft, setDraft] = useState("");
-  const trimmedDraft = draft.trim();
-  const duplicate = settings.names.some((name) => name.toLowerCase() === trimmedDraft.toLowerCase());
-  const canAdd = trimmedDraft.length > 0 && !duplicate && settings.names.length < MAX_BLOCKED_MERCHANTS;
-
-  function addMerchant(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canAdd) return;
-    onChange({
-      ...settings,
-      names: normalizeBlockedMerchantNames([...settings.names, trimmedDraft]),
-    });
-    setDraft("");
-  }
-
-  function removeMerchant(name: string) {
-    onChange({
-      ...settings,
-      names: settings.names.filter((item) => item.toLowerCase() !== name.toLowerCase()),
-    });
-  }
-
-  return (
-    <section className="merchant-blocklist-panel" aria-label="Merchant blocklist">
-      <div className="merchant-blocklist-header">
-        <div>
-          <span className="section-kicker">MERCHANT FILTER</span>
-          <h2>Blocklist <span className="blocklist-count">{settings.names.length}/{MAX_BLOCKED_MERCHANTS}</span></h2>
-          <p>Hide exact merchant names across all exchanges and both sides.</p>
-        </div>
-        <button
-          className={`blocklist-mode-toggle ${settings.enabled ? "is-active" : ""}`}
-          type="button"
-          aria-pressed={settings.enabled}
-          onClick={() => onChange({ ...settings, enabled: !settings.enabled })}
-        >
-          <span className="blocklist-mode-dot" />
-          Block mode {settings.enabled ? "on" : "off"}
-        </button>
-      </div>
-      <form className="blocklist-add-form" onSubmit={addMerchant}>
-        <label className="sr-only" htmlFor="merchant-blocklist-input">Merchant name to block</label>
-        <input
-          id="merchant-blocklist-input"
-          type="text"
-          maxLength={80}
-          value={draft}
-          placeholder="Type a merchant name"
-          onChange={(event) => setDraft(event.target.value)}
-          disabled={settings.names.length >= MAX_BLOCKED_MERCHANTS}
-        />
-        <button type="submit" disabled={!canAdd}>Add merchant</button>
-      </form>
-      <div className="merchant-blocklist-list" aria-label="Blocked merchants">
-        {settings.names.length > 0 ? settings.names.map((name) => (
-          <span className="merchant-blocklist-chip" key={name.toLowerCase()}>
-            {name}
-            <button type="button" aria-label={`Remove ${name} from blocklist`} onClick={() => removeMerchant(name)}>×</button>
-          </span>
-        )) : <span className="merchant-blocklist-empty">No merchant names blocked.</span>}
-      </div>
-      <p className="merchant-blocklist-note">Names are matched case-insensitively. Changes are saved in this browser.</p>
     </section>
   );
 }
@@ -370,24 +252,9 @@ export default function HomePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [blocklistSettings, setBlocklistSettings] = useState<MerchantBlocklistSettings | null>(null);
   const lastSuccessfulFiat = useRef<FiatCurrency | null>(null);
 
   useEffect(() => {
-    setBlocklistSettings(readBlocklistSettings());
-  }, []);
-
-  useEffect(() => {
-    if (!blocklistSettings) return;
-    try {
-      window.localStorage.setItem(BLOCKLIST_STORAGE_KEY, JSON.stringify(blocklistSettings));
-    } catch {
-      // Filtering still works for the current session if storage is unavailable.
-    }
-  }, [blocklistSettings]);
-
-  useEffect(() => {
-    if (!blocklistSettings) return;
     let active = true;
     let inFlight = false;
     let controller: AbortController | null = null;
@@ -401,13 +268,7 @@ export default function HomePage() {
       setFetchError(null);
 
       try {
-        const response = await fetch("/api/quotes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fiat,
-            blockedMerchants: blocklistSettings.enabled ? blocklistSettings.names : [],
-          }),
+        const response = await fetch(`/api/quotes?fiat=${fiat}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -440,23 +301,9 @@ export default function HomePage() {
       window.clearInterval(interval);
       controller?.abort();
     };
-  }, [fiat, refreshKey, blocklistSettings]);
+  }, [fiat, refreshKey]);
 
-  const activeBlockedMerchants = blocklistSettings?.enabled
-    ? blocklistSettings.names
-    : NO_BLOCKED_MERCHANTS;
-  const visibleQuotes = useMemo(() => {
-    if (quotes?.fiat !== fiat) return null;
-    if (activeBlockedMerchants.length === 0) return quotes;
-    return {
-      ...quotes,
-      exchanges: quotes.exchanges.map((exchange) => ({
-        ...exchange,
-        buy: hideBlockedOffers(exchange.buy, activeBlockedMerchants),
-        sell: hideBlockedOffers(exchange.sell, activeBlockedMerchants),
-      })),
-    };
-  }, [quotes, fiat, activeBlockedMerchants]);
+  const visibleQuotes = quotes?.fiat === fiat ? quotes : null;
   const quoteByExchange = useMemo(() => {
     const map = new Map<ExchangeId, ExchangeQuote>();
     for (const quote of visibleQuotes?.exchanges ?? []) map.set(quote.id, quote);
@@ -510,7 +357,7 @@ export default function HomePage() {
 
         <section className="exchange-section" aria-label="Exchange P2P offers">
           <div className="section-heading exchange-section-heading">
-            <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
+            <div><span className="section-kicker">ALL EXCHANGE LISTINGS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
             <div className="result-legend"><span className="legend-check">✓</span> Top 2 first · expand to see more merchants</div>
           </div>
           <div className="exchange-grid">
@@ -524,7 +371,7 @@ export default function HomePage() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" /> P2P MARKET OVERVIEW</div>
             <h1>Find your next<br /><span>best P2P rate.</span></h1>
-            <p>Compare top USDT offers across the exchanges, filtered to ABA Bank merchants only.</p>
+            <p>Compare USDT buy and sell ads across exchanges, with no merchant, payment-method, or USD price filters.</p>
           </div>
           <div className="hero-aside">
             <div className="hero-orbit orbit-large" />
@@ -532,7 +379,7 @@ export default function HomePage() {
             <div className="hero-aside-card">
               <div className="hero-aside-head"><span className={`market-signal ${liveSides > 0 ? "is-live" : ""}`}><i /></span><span>{liveSides > 0 ? "LIVE MARKET SNAPSHOT" : visibleQuotes ? "MARKET FEED STATUS" : "CONNECTING TO EXCHANGES"}</span></div>
               <div className="hero-aside-rate"><span>USDT</span><span className="rate-arrow">↔</span><span>{fiat}</span></div>
-              <div className="hero-aside-foot"><BankMark /> <span>ABA Bank only</span><span className="foot-dot" /> <span>Top 2 per side</span></div>
+              <div className="hero-aside-foot"><span>All payment methods</span><span className="foot-dot" /><span>Top 2 per side</span></div>
             </div>
           </div>
         </section>
@@ -553,19 +400,12 @@ export default function HomePage() {
           </div>
           <div className="filter-divider" />
           <div className="filter-group payment-filter">
-            <span className="filter-label">PAYMENT METHOD</span>
-            <div className="payment-value"><BankMark /><strong>ABA Bank</strong><span className="fixed-chip">FIXED</span></div>
+            <span className="filter-label">OFFER SCOPE</span>
+            <div className="payment-value"><strong>All merchants and payment methods</strong></div>
           </div>
           <div className="filter-spacer" />
           <div className="refresh-info"><span className="refresh-clock"><RefreshIcon /></span><span>Auto refresh<br /><b>Every 30 seconds</b></span></div>
         </section>
-
-        {blocklistSettings ? (
-          <MerchantBlocklistPanel
-            settings={blocklistSettings}
-            onChange={(settings) => setBlocklistSettings(settings)}
-          />
-        ) : null}
 
         {fetchError ? (
           <div className="alert-banner" role="status">
@@ -589,7 +429,7 @@ export default function HomePage() {
 
         <footer className="page-footer">
           <div className="footer-brand"><span className="brand-symbol small"><span /></span><strong>P2P RADAR</strong></div>
-          <p>Prices and merchant availability can change quickly. Confirm the listing and ABA transfer details on the exchange before trading.</p>
+          <p>Prices and merchant availability can change quickly. Confirm the listing and payment details on the exchange before trading.</p>
           <span className="footer-time">{getUpdatedTime(updatedAt)}</span>
         </footer>
       </div>
