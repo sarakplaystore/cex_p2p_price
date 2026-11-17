@@ -25,5 +25,5 @@ Import this repository into Vercel and keep the detected **Next.js** framework a
 - Fiat markets are currently USD and KHR. ABA Bank's available listings vary by exchange and fiat.
 - The exchange endpoints are public marketplace interfaces, not a guaranteed/stable API. If an exchange changes its response or blocks serverless requests, that exchange/side is shown as unavailable rather than substituting another bank or fabricated prices.
 - Ads are filtered by the payment-method name returned by the exchange. Offers that do not expose a verifiable ABA label are intentionally excluded.
-- For USD, maker-sell ads (shown on the Buy USDT side) are limited to $0.90–$1.015. KHR prices and maker-buy ads are not subject to this USD range.
+- For USD, both Buy USDT and Sell USDT offers are limited to $0.90–$1.015. KHR prices are not subject to this USD range.
 - P2P prices, limits, merchant status, and availability can change at any time. Confirm all details on the exchange before transferring money; this dashboard is informational only.

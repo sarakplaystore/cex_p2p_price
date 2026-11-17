@@ -1,6 +1,6 @@
 import {
   hasAbaBankPayment,
-  isWithinMakerSellPriceRange,
+  isWithinUsdPriceRange,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -573,10 +573,10 @@ export async function loadSideQuote(
     const offers = rows
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
-    const excludedMakerSellAbaAd = offers.some(
-      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinMakerSellPriceRange(offer),
+    const excludedUsdAbaAd = offers.some(
+      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinUsdPriceRange(offer),
     );
-    const eligibleOffers = offers.filter(isWithinMakerSellPriceRange);
+    const eligibleOffers = offers.filter(isWithinUsdPriceRange);
     const topOffers = selectTopMerchants(eligibleOffers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
@@ -584,8 +584,8 @@ export async function loadSideQuote(
       : {
           status: "empty",
           offers: [],
-          message: excludedMakerSellAbaAd
-            ? "Maker-sell USD ads outside $0.90–$1.015 were excluded."
+          message: excludedUsdAbaAd
+            ? "USD ABA ads outside $0.90–$1.015 were excluded."
             : "No verifiable ABA Bank ads found.",
         };
   } catch (error) {
