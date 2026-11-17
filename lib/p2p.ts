@@ -60,12 +60,13 @@ export function hasAbaBankPayment(paymentMethods: string[]): boolean {
 }
 
 /**
- * Keep USD offers outside the configured price band on both panels. KHR
- * prices use a different scale and are not subject to this range.
+ * Maker sells USDT on the dashboard's Buy side. Apply the USD guard only to
+ * those offers; KHR prices and maker-buy offers use different price scales.
  */
-export function isAllowedByUsdPriceRule(offer: P2POffer): boolean {
-  if (offer.fiat !== "USD") return true;
-  return offer.price < USD_OFFER_PRICE_RANGE.min || offer.price > USD_OFFER_PRICE_RANGE.max;
+export function isWithinMakerSellPriceRange(offer: P2POffer): boolean {
+  const makerSide = offer.side === "buy" ? "sell" : "buy";
+  if (offer.fiat !== "USD" || makerSide !== "sell") return true;
+  return offer.price >= USD_OFFER_PRICE_RANGE.min && offer.price <= USD_OFFER_PRICE_RANGE.max;
 }
 
 /**
