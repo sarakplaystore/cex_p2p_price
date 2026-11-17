@@ -14,6 +14,8 @@ export type QuoteStatus = "live" | "empty" | "error";
 export const INITIAL_MERCHANT_LIMIT = 2;
 export const MERCHANTS_PER_SHOW_MORE = 2;
 export const MAX_MERCHANTS_PER_SIDE = 20;
+export const MAX_PRICE_DEVIATION_FROM_MARKET = 0.15;
+export const MIN_EXCHANGES_FOR_MARKET_REFERENCE = 3;
 
 export interface P2POffer {
   id: string;
@@ -95,6 +97,71 @@ export function selectTopMerchants(
   }
 
   return selected;
+}
+
+export function medianPrice(values: number[]): number | null {
+  const sorted = values.filter((value) => Number.isFinite(value) && value > 0).sort((left, right) => left - right);
+  if (!sorted.length) return null;
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function medianForSide(quote: SideQuote): number | null {
+  return quote.status === "live" ? medianPrice(quote.offers.map((offer) => offer.price)) : null;
+}
+
+function marketReferencePrice(exchanges: ExchangeQuote[], side: P2PSide): number | null {
+  const sideReferences = exchanges
+    .map((exchange) => medianForSide(exchange[side]))
+    .filter((price): price is number => price !== null);
+
+  if (sideReferences.length >= MIN_EXCHANGES_FOR_MARKET_REFERENCE) {
+    return medianPrice(sideReferences);
+  }
+
+  // When one side has sparse data, use one combined median per exchange so the
+  // buy/sell spread does not prevent a useful cross-exchange reference.
+  const combinedExchangeReferences = exchanges
+    .map((exchange) => medianPrice([
+      ...(exchange.buy.status === "live" ? exchange.buy.offers.map((offer) => offer.price) : []),
+      ...(exchange.sell.status === "live" ? exchange.sell.offers.map((offer) => offer.price) : []),
+    ]))
+    .filter((price): price is number => price !== null);
+
+  return combinedExchangeReferences.length >= MIN_EXCHANGES_FOR_MARKET_REFERENCE
+    ? medianPrice(combinedExchangeReferences)
+    : null;
+}
+
+function filterSidePriceOutliers(quote: SideQuote, referencePrice: number | null): SideQuote {
+  if (quote.status !== "live" || referencePrice === null) return quote;
+
+  const offers = quote.offers.filter(
+    (offer) => Math.abs(offer.price - referencePrice) / referencePrice <= MAX_PRICE_DEVIATION_FROM_MARKET,
+  );
+  if (offers.length === quote.offers.length) return quote;
+  if (!offers.length) {
+    return { status: "empty", offers: [], message: "Offers outside the normal market price range were hidden." };
+  }
+
+  return { ...quote, offers };
+}
+
+/**
+ * Remove prices that deviate more than 15% from a cross-exchange median.
+ * Each exchange contributes one median so a large listing count cannot dominate.
+ * If fewer than three exchanges have usable prices, leave quotes unchanged.
+ */
+export function filterMarketPriceOutliers(exchanges: ExchangeQuote[]): ExchangeQuote[] {
+  const buyReference = marketReferencePrice(exchanges, "buy");
+  const sellReference = marketReferencePrice(exchanges, "sell");
+
+  return exchanges.map((exchange) => ({
+    ...exchange,
+    buy: filterSidePriceOutliers(exchange.buy, buyReference),
+    sell: filterSidePriceOutliers(exchange.sell, sellReference),
+  }));
 }
 
 export function normalizeCompletionRate(value: unknown): number | null {
