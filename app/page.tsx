@@ -36,7 +36,7 @@ function formatLimit(value: number, fiat: FiatCurrency): string {
 }
 
 function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function getExchangeName(id: ExchangeId): string {
