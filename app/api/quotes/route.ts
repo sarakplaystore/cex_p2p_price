@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadSideQuote } from "@/lib/exchanges";
-import { DEFAULT_FIAT, EXCHANGES, filterMarketPriceOutliers, type FiatCurrency, type QuotesPayload } from "@/lib/p2p";
+import { DEFAULT_FIAT, EXCHANGES, type FiatCurrency, type QuotesPayload } from "@/lib/p2p";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +25,13 @@ export async function GET(request: Request) {
       return { id, buy, sell };
     }),
   );
-  const exchanges = filterMarketPriceOutliers(exchangeQuotes);
-
   const payload: QuotesPayload = {
     asset: "USDT",
     fiat,
     paymentMethod: "ABA Bank",
     updatedAt: new Date().toISOString(),
     refreshAfterSeconds: 30,
-    exchanges,
+    exchanges: exchangeQuotes,
   };
 
   return NextResponse.json(payload, {
