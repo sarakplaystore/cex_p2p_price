@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hasAbaBankPayment, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
+import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
   return {
@@ -62,4 +63,108 @@ test("completion rates normalize fractions, percentages, and invalid values", ()
   assert.equal(normalizeCompletionRate("98.5%"), 98.5);
   assert.equal(normalizeCompletionRate("98.5"), 98.5);
   assert.equal(normalizeCompletionRate("unknown"), null);
+});
+
+test("OKX user buy/sell selects the matching advertiser-side list", () => {
+  const payload = {
+    data: {
+      buy: [{ id: "advertiser-buys", price: "4100" }],
+      sell: [{ id: "advertiser-sells", price: "4200" }],
+    },
+  };
+
+  assert.equal(extractOkxRows(payload, "buy")[0]?.id, "advertiser-sells");
+  assert.equal(extractOkxRows(payload, "sell")[0]?.id, "advertiser-buys");
+});
+
+test("Bybit and Bitget request the correct advertiser sides", () => {
+  assert.equal(bybitAdvertiserSide("buy"), "0");
+  assert.equal(bybitAdvertiserSide("sell"), "1");
+  assert.equal(bitgetMarketSide("buy"), 1);
+  assert.equal(bitgetMarketSide("sell"), 2);
+});
+
+test("Bitget empty ad list is valid, malformed response is rejected", () => {
+  assert.deepEqual(extractBitgetRows({ data: { dataList: null } }), []);
+  assert.deepEqual(extractBitgetRows({ data: { dataList: [] } }), []);
+  assert.throws(() => extractBitgetRows({ data: {} }), /data.dataList/);
+  assert.throws(() => extractBitgetRows({ data: { dataList: {} } }), /not an array/);
+});
+
+test("OKX offer details normalize payment, price, and merchant", () => {
+  const result = normalizeOffer(
+    {
+      id: "okx-ad-1",
+      price: "4075.5",
+      availableAmount: "1200",
+      quoteMinAmountPerOrder: "10000",
+      quoteMaxAmountPerOrder: "800000",
+      completedOrderQuantity: 15,
+      completedRate: "0.99",
+      merchantId: "okx-merchant-1",
+      nickName: "OKX Trader",
+      paymentMethods: ["ABA Bank"],
+    },
+    "okx",
+    "buy",
+    "KHR",
+  );
+
+  assert.ok(result);
+  assert.equal(result.merchantId, "okx-merchant-1");
+  assert.equal(result.merchantName, "OKX Trader");
+  assert.equal(result.minFiat, 10000);
+  assert.equal(result.maxFiat, 800000);
+  assert.equal(result.tradeCount, 15);
+  assert.equal(result.completionRate, 99);
+  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
+});
+
+test("Bitget ad shape normalizes ABA method and merchant details", () => {
+  const result = normalizeOffer(
+    {
+      adNo: "bg-ad-1",
+      price: "4100.25",
+      minAmount: "10000",
+      maxAmount: "500000",
+      lastAmount: "20",
+      paymethodInfo: [{ paymethodId: "123", paymethodName: "ABA Bank" }],
+      nickName: "ABA Trader",
+      encryptUserId: "bitget-user-1",
+      thirtyTunoverNum: 42,
+      thirtyCompletionRate: "0.98",
+      certifiedMerchant: 1,
+    },
+    "bitget",
+    "buy",
+    "KHR",
+  );
+
+  assert.ok(result);
+  assert.equal(result.merchantId, "bitget-user-1");
+  assert.equal(result.merchantName, "ABA Trader");
+  assert.equal(result.price, 4100.25);
+  assert.equal(result.tradeCount, 42);
+  assert.equal(result.completionRate, 98);
+  assert.equal(result.verified, true);
+  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
+});
+
+test("Bybit payment ids resolve to ABA labels before filtering", () => {
+  const [row] = addBybitPaymentNames(
+    [
+      {
+        id: "bybit-ad-1",
+        price: "4101",
+        payments: ["19"],
+        userInfo: { userId: "bybit-user-1", nickName: "Bybit Trader" },
+      },
+    ],
+    new Map([["19", "ABA Bank"]]),
+  );
+  const result = row && normalizeOffer(row, "bybit", "buy", "KHR");
+
+  assert.ok(result);
+  assert.equal(result.merchantId, "bybit-user-1");
+  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
 });

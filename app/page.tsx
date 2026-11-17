@@ -322,7 +322,7 @@ export default function HomePage() {
           <div className="topbar-right">
             <div className={`feed-status ${liveSides > 0 ? "feed-on" : ""}`}>
               <span className="feed-indicator" />
-              <span>{visibleQuotes ? `${liveSides} / 6 feeds live` : "Connecting to markets"}</span>
+              <span>{visibleQuotes ? `${liveSides} / ${EXCHANGES.length * 2} feeds live` : "Connecting to markets"}</span>
             </div>
             <button className="refresh-button" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={refreshing}>
               <RefreshIcon spinning={refreshing} />
@@ -393,7 +393,7 @@ export default function HomePage() {
 
         <section className="exchange-section" aria-label="Exchange P2P offers">
           <div className="section-heading exchange-section-heading">
-            <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">3</span></h2></div>
+            <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
             <div className="result-legend"><span className="legend-check">✓</span> Up to 2 distinct merchants · each side</div>
           </div>
           <div className="exchange-grid">

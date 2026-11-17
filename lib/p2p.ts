@@ -2,6 +2,7 @@ export const EXCHANGES = [
   { id: "binance", name: "Binance", monogram: "B", color: "#f0b90b" },
   { id: "okx", name: "OKX", monogram: "OKX", color: "#17191f" },
   { id: "bybit", name: "Bybit", monogram: "By", color: "#f7a600" },
+  { id: "bitget", name: "Bitget", monogram: "BG", color: "#12b6a0" },
 ] as const;
 
 export type ExchangeId = (typeof EXCHANGES)[number]["id"];

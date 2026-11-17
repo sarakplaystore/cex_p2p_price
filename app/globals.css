@@ -145,7 +145,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .count-chip { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #e6f3ef; color: #178363; font-family: var(--body-font); font-size: 10px; font-weight: 700; letter-spacing: 0; }
 .result-legend { color: #7f8d93; display: flex; align-items: center; gap: 7px; padding-bottom: 2px; font-size: 10px; }
 .legend-check { width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; color: #0b9871; background: #e6f6ef; font-size: 10px; font-weight: 800; }
-.exchange-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
+.exchange-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
 .exchange-card { min-width: 0; border: 1px solid #e3eaea; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: 0 8px 22px rgba(23, 55, 62, .035); }
 .exchange-card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 15px; border-bottom: 1px solid #edf1f1; }
 .exchange-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -153,6 +153,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .mark-binance { color: #926c00; }
 .mark-okx { color: #fff; background: #16181c; font-size: 8px; letter-spacing: -.02em; }
 .mark-bybit { color: #9a6411; }
+.mark-bitget { color: #087968; }
 .exchange-identity h2 { margin: 0; color: #172b34; font-family: var(--display-font); font-size: 13px; font-weight: 800; }
 .exchange-identity p { margin: 3px 0 0; color: #91a0a4; font-size: 9px; font-weight: 600; }
 .exchange-state { display: inline-flex; align-items: center; gap: 6px; color: #8b999e; padding: 5px 7px; border-radius: 5px; background: #f4f6f6; font-size: 7px; font-weight: 800; letter-spacing: .07em; }
@@ -223,9 +224,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .page-container { width: min(100% - 48px, 1120px); }
   .hero { padding-left: 42px; padding-right: 42px; }
   .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .exchange-card:last-child { grid-column: 1 / -1; }
-  .exchange-card:last-child .exchange-card-body { min-height: unset; }
-  .exchange-card:last-child .side-panel { padding-left: 17px; padding-right: 17px; }
   .offer-price-line strong { font-size: 15px; }
   .controls-card { gap: 19px; }
 }
@@ -254,9 +252,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .summary-spread .summary-value { font-size: 15px; }
   .section-heading h2 { font-size: 17px; }
   .exchange-grid { grid-template-columns: 1fr; }
-  .exchange-card:last-child { grid-column: auto; }
   .exchange-card-body { grid-template-columns: 1fr 1fr; }
-  .exchange-card:last-child .side-panel { padding: 13px 11px 12px; }
   .offer-price-line strong { font-size: 16px; }
   .page-footer { flex-wrap: wrap; gap: 10px; padding: 15px 0; }
   .page-footer p { min-width: calc(100% - 150px); }
