@@ -11,6 +11,10 @@ export const DEFAULT_FIAT: FiatCurrency = "USD";
 export type P2PSide = "buy" | "sell";
 export type QuoteStatus = "live" | "empty" | "error";
 
+export const INITIAL_MERCHANT_LIMIT = 2;
+export const MERCHANTS_PER_SHOW_MORE = 2;
+export const MAX_MERCHANTS_PER_SIDE = 20;
+
 export interface P2POffer {
   id: string;
   exchange: ExchangeId;
@@ -61,7 +65,7 @@ export function hasAbaBankPayment(paymentMethods: string[]): boolean {
 export function selectTopMerchants(
   offers: P2POffer[],
   side: P2PSide,
-  limit = 2,
+  limit = INITIAL_MERCHANT_LIMIT,
 ): P2POffer[] {
   const ranked = offers
     .filter(

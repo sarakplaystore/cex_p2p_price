@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_FIAT,
   EXCHANGES,
+  INITIAL_MERCHANT_LIMIT,
+  MERCHANTS_PER_SHOW_MORE,
   type ExchangeId,
   type ExchangeQuote,
   type FiatCurrency,
@@ -98,7 +100,7 @@ function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: numbe
           <span className="merchant-avatar">{offer.merchantName.slice(0, 1).toUpperCase()}</span>
           <span className="merchant-name">{offer.merchantName}</span>
         </div>
-        {index === 0 ? <span className="best-pill">BEST</span> : <span className="rank-pill">0{index + 1}</span>}
+        {index === 0 ? <span className="best-pill">BEST</span> : <span className="rank-pill">{String(index + 1).padStart(2, "0")}</span>}
       </div>
       <div className="offer-price-line">
         <strong>{formatPrice(offer.price, fiat)}</strong>
@@ -130,9 +132,14 @@ function OfferSide({
   fiat: FiatCurrency;
   loading: boolean;
 }) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_MERCHANT_LIMIT);
   const title = side === "buy" ? "Buy USDT" : "Sell USDT";
   const description = side === "buy" ? "Lowest advertiser rate first" : "Highest advertiser rate first";
   const sideClass = side === "buy" ? "buy" : "sell";
+  const offers = quote?.status === "live" ? quote.offers : [];
+  const visibleOffers = offers.slice(0, visibleCount);
+  const hasMore = visibleCount < offers.length;
+  const nextCount = Math.min(MERCHANTS_PER_SHOW_MORE, offers.length - visibleCount);
 
   return (
     <section className={`side-panel ${sideClass}`} aria-label={`${title} offers`}>
@@ -142,7 +149,7 @@ function OfferSide({
           <h3>{title}</h3>
           <p>{description}</p>
         </div>
-        <span className="merchant-count">{quote?.status === "live" ? `${quote.offers.length}/2` : "0/2"}</span>
+        <span className="merchant-count">{quote?.status === "live" ? `${visibleOffers.length}/${offers.length}` : "0"}</span>
       </div>
 
       {loading && !quote ? (
@@ -151,11 +158,28 @@ function OfferSide({
           <div className="offer-skeleton second"><span /><span /><span /></div>
         </div>
       ) : quote?.status === "live" ? (
-        <div className="offer-list">
-          {quote.offers.slice(0, 2).map((offer, index) => (
-            <OfferCard key={`${offer.id}-${offer.merchantId ?? offer.merchantName}`} offer={offer} index={index} side={side} fiat={fiat} />
-          ))}
-        </div>
+        <>
+          <div className="offer-list">
+            {visibleOffers.map((offer, index) => (
+              <OfferCard key={`${offer.id}-${offer.merchantId ?? offer.merchantName}`} offer={offer} index={index} side={side} fiat={fiat} />
+            ))}
+          </div>
+          {offers.length > INITIAL_MERCHANT_LIMIT ? (
+            <button
+              className="show-more-button"
+              type="button"
+              aria-expanded={visibleCount > INITIAL_MERCHANT_LIMIT}
+              onClick={() => setVisibleCount((current) => (
+                current >= offers.length
+                  ? INITIAL_MERCHANT_LIMIT
+                  : Math.min(current + MERCHANTS_PER_SHOW_MORE, offers.length)
+              ))}
+            >
+              {hasMore ? `Show ${nextCount} more merchant${nextCount === 1 ? "" : "s"}` : "Show fewer"}
+              <span aria-hidden="true">{hasMore ? "↓" : "↑"}</span>
+            </button>
+          ) : null}
+        </>
       ) : (
         <div className={`empty-state ${quote?.status === "error" ? "is-error" : ""}`}>
           <span className="empty-state-icon">{quote?.status === "error" ? "!" : "—"}</span>
@@ -190,8 +214,8 @@ function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EX
         </span>
       </header>
       <div className="exchange-card-body">
-        <OfferSide side="buy" quote={quote?.buy} fiat={fiat} loading={loading} />
-        <OfferSide side="sell" quote={quote?.sell} fiat={fiat} loading={loading} />
+        <OfferSide key={`${exchange.id}-${fiat}-buy`} side="buy" quote={quote?.buy} fiat={fiat} loading={loading} />
+        <OfferSide key={`${exchange.id}-${fiat}-sell`} side="sell" quote={quote?.sell} fiat={fiat} loading={loading} />
       </div>
     </article>
   );
@@ -335,7 +359,7 @@ export default function HomePage() {
         <section className="exchange-section" aria-label="Exchange P2P offers">
           <div className="section-heading exchange-section-heading">
             <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
-            <div className="result-legend"><span className="legend-check">✓</span> Up to 2 distinct merchants · each side</div>
+            <div className="result-legend"><span className="legend-check">✓</span> Top 2 first · expand to see more merchants</div>
           </div>
           <div className="exchange-grid">
             {EXCHANGES.map((exchange) => (
