@@ -74,6 +74,16 @@ function TrendIcon({ direction }: { direction: "up" | "down" }) {
   );
 }
 
+function BankMark() {
+  return (
+    <span className="bank-mark" aria-hidden="true">
+      <svg viewBox="0 0 20 20" fill="none">
+        <path d="m2.5 7 7.5-4 7.5 4M4.5 8.5v6m3.65-6v6m3.7-6v6m3.65-6v6M3 16h14M2 18h16" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: number; side: P2PSide; fiat: FiatCurrency }) {
   const limit = offer.minFiat !== null || offer.maxFiat !== null
     ? `${offer.minFiat !== null ? formatLimit(offer.minFiat, fiat) : "—"} – ${offer.maxFiat !== null ? formatLimit(offer.maxFiat, fiat) : "—"}`
@@ -82,8 +92,6 @@ function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: numbe
     offer.tradeCount !== null ? `${formatCount(offer.tradeCount)} trades` : null,
     offer.completionRate !== null ? `${Math.round(offer.completionRate)}% completion` : null,
   ].filter(Boolean).join(" · ");
-  const visiblePaymentMethods = offer.paymentMethods.slice(0, 2);
-  const additionalPaymentMethodCount = Math.max(0, offer.paymentMethods.length - visiblePaymentMethods.length);
 
   return (
     <article className={`offer-card ${index === 0 ? "is-best" : ""}`}>
@@ -98,15 +106,8 @@ function OfferCard({ offer, index, side, fiat }: { offer: P2POffer; index: numbe
         <strong>{formatPrice(offer.price, fiat)}</strong>
         <span>/ USDT</span>
       </div>
-      <div className="offer-meta-line" title={offer.paymentMethods.join(", ") || "Payment method not listed"}>
-        {visiblePaymentMethods.length > 0
-          ? visiblePaymentMethods.map((method, methodIndex) => (
-              <span className="payment-method-tag" key={`${method}-${methodIndex}`}>{method}</span>
-            ))
-          : <span className="payment-method-tag is-muted">Payment method not listed</span>}
-        {additionalPaymentMethodCount > 0
-          ? <span className="payment-method-more">+{additionalPaymentMethodCount}</span>
-          : null}
+      <div className="offer-meta-line">
+        <span className="aba-tag" title={offer.paymentMethods.join(", ")}><BankMark /> ABA Bank</span>
         {offer.verified ? <span className="pro-tag">Verified</span> : null}
       </div>
       <div className="offer-divider" />
@@ -182,8 +183,8 @@ function OfferSide({
       ) : (
         <div className={`empty-state ${quote?.status === "error" ? "is-error" : ""}`}>
           <span className="empty-state-icon">{quote?.status === "error" ? "!" : "—"}</span>
-          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? quote.message ?? "No offers found" : "Waiting for market data"}</p>
-          <span>{quote?.status === "error" ? "Try refreshing in a moment." : "All available exchange listings are included."}</span>
+          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? quote.message ?? "No ABA Bank ads found" : "Waiting for market data"}</p>
+          <span>{quote?.status === "error" ? "Try refreshing in a moment." : "Only ads that list ABA Bank are shown."}</span>
         </div>
       )}
     </section>
@@ -357,7 +358,7 @@ export default function HomePage() {
 
         <section className="exchange-section" aria-label="Exchange P2P offers">
           <div className="section-heading exchange-section-heading">
-            <div><span className="section-kicker">ALL EXCHANGE LISTINGS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
+            <div><span className="section-kicker">ABA BANK LISTINGS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
             <div className="result-legend"><span className="legend-check">✓</span> Top 2 first · expand to see more merchants</div>
           </div>
           <div className="exchange-grid">
@@ -371,7 +372,7 @@ export default function HomePage() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" /> P2P MARKET OVERVIEW</div>
             <h1>Find your next<br /><span>best P2P rate.</span></h1>
-            <p>Compare USDT buy and sell ads across exchanges, with no merchant, payment-method, or USD price filters.</p>
+            <p>Compare USDT buy and sell ads that accept ABA Bank across all four exchanges.</p>
           </div>
           <div className="hero-aside">
             <div className="hero-orbit orbit-large" />
@@ -379,7 +380,7 @@ export default function HomePage() {
             <div className="hero-aside-card">
               <div className="hero-aside-head"><span className={`market-signal ${liveSides > 0 ? "is-live" : ""}`}><i /></span><span>{liveSides > 0 ? "LIVE MARKET SNAPSHOT" : visibleQuotes ? "MARKET FEED STATUS" : "CONNECTING TO EXCHANGES"}</span></div>
               <div className="hero-aside-rate"><span>USDT</span><span className="rate-arrow">↔</span><span>{fiat}</span></div>
-              <div className="hero-aside-foot"><span>All payment methods</span><span className="foot-dot" /><span>Top 2 per side</span></div>
+              <div className="hero-aside-foot"><BankMark /> <span>ABA Bank only</span><span className="foot-dot" /> <span>Top 2 per side</span></div>
             </div>
           </div>
         </section>
@@ -400,8 +401,8 @@ export default function HomePage() {
           </div>
           <div className="filter-divider" />
           <div className="filter-group payment-filter">
-            <span className="filter-label">OFFER SCOPE</span>
-            <div className="payment-value"><strong>All merchants and payment methods</strong></div>
+            <span className="filter-label">PAYMENT METHOD</span>
+            <div className="payment-value"><BankMark /><strong>ABA Bank</strong><span className="fixed-chip">FIXED</span></div>
           </div>
           <div className="filter-spacer" />
           <div className="refresh-info"><span className="refresh-clock"><RefreshIcon /></span><span>Auto refresh<br /><b>Every 30 seconds</b></span></div>
@@ -429,7 +430,7 @@ export default function HomePage() {
 
         <footer className="page-footer">
           <div className="footer-brand"><span className="brand-symbol small"><span /></span><strong>P2P RADAR</strong></div>
-          <p>Prices and merchant availability can change quickly. Confirm the listing and payment details on the exchange before trading.</p>
+          <p>Prices and merchant availability can change quickly. Confirm the listing and ABA transfer details on the exchange before trading.</p>
           <span className="footer-time">{getUpdatedTime(updatedAt)}</span>
         </footer>
       </div>

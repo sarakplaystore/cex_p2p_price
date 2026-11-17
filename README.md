@@ -1,6 +1,6 @@
 # CEX P2P Price Radar
 
-A Vercel-ready dashboard for comparing **USDT P2P buy and sell ads** on Binance, OKX, Bybit, and Bitget. It includes offers across payment methods and merchant names, with no USD price-range restriction. Each side starts with the top two distinct merchants and lets you expand the list to see more, up to 20 merchants when the exchange has enough listings.
+A Vercel-ready dashboard for comparing **USDT P2P buy and sell ads that accept ABA Bank** on Binance, OKX, Bybit, and Bitget. Each side starts with the top two distinct merchants and lets you expand the list to see more, up to 20 merchants when the exchange has enough listings.
 
 ## Run locally
 
@@ -22,8 +22,8 @@ Import this repository into Vercel and keep the detected **Next.js** framework a
 
 ## Notes
 
-- Fiat markets are currently USD and KHR, with USD selected by default. Offers are not filtered by payment method, the former $0.90–$1.015 USD maker-sell range, or merchant name.
+- The ABA filter applies to both sides in USD and KHR. There is no USD price band or merchant-name blocklist.
 - Results are ranked by price for the selected side, with one ad per merchant. The initial view shows two offers per side; show-more reveals up to 20 offers per side as provided by the exchange.
-- Payment-method names are displayed when the exchange returns them; offers are not excluded when a method is non-ABA or unavailable in the response.
+- An ad qualifies if at least one exchange-listed payment method identifies ABA Bank, even if the ad also accepts other methods. Ads with missing or unrecognized methods are excluded before ranking; if none qualify, no ads are shown for that side.
 - The exchange endpoints are public marketplace interfaces, not guaranteed/stable APIs. If an exchange changes its response or blocks serverless requests, that exchange/side is shown as unavailable rather than substituting another bank or fabricated prices.
 - P2P prices, limits, merchant status, and availability can change at any time. Confirm all details on the exchange before transferring money; this dashboard is informational only.

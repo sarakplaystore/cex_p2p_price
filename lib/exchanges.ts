@@ -1,4 +1,5 @@
 import {
+  hasAbaBankPayment,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -84,6 +85,14 @@ function nestedRecords(row: JsonRecord): JsonRecord[] {
   return result;
 }
 
+// Read method fields, not payment remarks/instructions that may mention an unrelated bank.
+const PAYMENT_METHOD_KEYS = new Set([
+  "trademethod", "trademethods", "trademethodname", "trademethodshortname",
+  "paymentmethod", "paymentmethods", "paymentmethodname", "paymentmethodnames", "paymentmethodlist", "paymentmethodobjects",
+  "payment", "payments", "paymentname", "paymenttype", "paymenttypes",
+  "paymethod", "paymethods", "paymethodinfo", "paymethodname", "paytype", "paytypes",
+]);
+
 function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): void {
   if (depth > 5 || value == null) return;
 
@@ -102,6 +111,7 @@ function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): vo
 
   const labelKeys = [
     "tradeMethodName",
+    "tradeMethodShortName",
     "paymentName",
     "paymentMethodName",
     "paymethodName",
@@ -125,7 +135,7 @@ function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): vo
   // Some responses wrap a method name one more level down; avoid collecting ids/numbers.
   if (!foundLabel) {
     for (const [key, child] of Object.entries(value)) {
-      if (/payment|pay|method|bank|trade/i.test(key)) {
+      if (PAYMENT_METHOD_KEYS.has(key.toLowerCase()) || /^(method|bank)$/i.test(key)) {
         collectPaymentNames(child, output, depth + 1);
       }
     }
@@ -135,11 +145,10 @@ function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): vo
 function paymentNamesFor(row: JsonRecord, ad: JsonRecord): string[] {
   const output = new Set<string>();
   const sources = [row, ad];
-  const paymentKeys = /payment|paytype|paymethod|trademethod/i;
 
   for (const source of sources) {
     for (const [key, value] of Object.entries(source)) {
-      if (paymentKeys.test(key)) collectPaymentNames(value, output);
+      if (PAYMENT_METHOD_KEYS.has(key.toLowerCase())) collectPaymentNames(value, output);
     }
   }
 
@@ -205,6 +214,13 @@ export function normalizeOffer(
     completionRate,
     verified,
   };
+}
+
+function rowsContainAba(rows: JsonRecord[], exchange: ExchangeId, side: P2PSide, fiat: FiatCurrency): boolean {
+  return rows.some((row) => {
+    const offer = normalizeOffer(row, exchange, side, fiat);
+    return offer !== null && hasAbaBankPayment(offer.paymentMethods);
+  });
 }
 
 function hasPrice(value: unknown): value is JsonRecord {
@@ -302,13 +318,17 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
 
 const binanceUrl = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
-async function requestBinance(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+async function requestBinance(
+  side: P2PSide,
+  fiat: FiatCurrency,
+  payTypes: string[],
+): Promise<JsonRecord[]> {
   const payload = await postJson(
     binanceUrl,
     {
       page: 1,
       rows: 20,
-      payTypes: [],
+      payTypes,
       asset: "USDT",
       tradeType: side === "buy" ? "BUY" : "SELL",
       fiat,
@@ -328,7 +348,17 @@ async function requestBinance(side: P2PSide, fiat: FiatCurrency): Promise<JsonRe
 }
 
 async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  return requestBinance(side, fiat);
+  const firstRows = await requestBinance(side, fiat, ["ABA Bank"]).catch(() => null);
+  if (firstRows && rowsContainAba(firstRows, "binance", side, fiat)) return firstRows;
+
+  // Binance's public API has used different values for its payment filter over
+  // time. Retry without that hint, then apply our own strict ABA-name filter.
+  try {
+    return await requestBinance(side, fiat, []);
+  } catch (fallbackError) {
+    if (firstRows) return firstRows;
+    throw fallbackError;
+  }
 }
 
 export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
@@ -547,7 +577,7 @@ export async function loadSideQuote(
 
     return topOffers.length
       ? { status: "live", offers: topOffers }
-      : { status: "empty", offers: [], message: "No valid offers found." };
+      : { status: "empty", offers: [], message: "No verifiable ABA Bank ads found." };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown exchange error";
     console.warn(`[P2P Radar] ${exchange} ${side} feed failed: ${reason}`);

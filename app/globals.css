@@ -85,6 +85,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .hero-aside-rate span:last-child { color: #54d2aa; }
 .rate-arrow { color: #75928f; font-size: 18px; }
 .hero-aside-foot { display: flex; align-items: center; gap: 7px; border-top: 1px solid rgba(208, 236, 226, .11); padding-top: 12px; color: #abc0be; font-size: 9px; font-weight: 600; }
+.hero-aside-foot .bank-mark { width: 15px; height: 15px; color: #52d1a5; }
 .foot-dot { width: 3px; height: 3px; border-radius: 50%; background: #5b9183; margin: 0 1px 0 3px; }
 
 .controls-card { min-height: 91px; display: flex; align-items: center; gap: 25px; padding: 16px 23px; border: 1px solid #e6ecec; border-radius: 13px; background: rgba(255,255,255,.96); margin-top: -24px; position: relative; z-index: 3; box-shadow: 0 10px 25px rgba(16, 45, 54, .045); }
@@ -101,13 +102,15 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .fiat-switch button.selected { color: #087f62; background: #fff; box-shadow: 0 1px 4px rgba(22, 52, 58, .1); }
 .payment-filter { min-width: 160px; }
 .payment-value { display: flex; align-items: center; gap: 8px; color: #20333a; font-size: 11px; }
+.bank-mark { display: inline-grid; width: 19px; height: 19px; place-items: center; color: #128569; flex: 0 0 auto; }
+.bank-mark svg { width: 100%; height: 100%; }
 .payment-value strong { font-weight: 700; }
+.fixed-chip { padding: 3px 5px; border-radius: 4px; color: #8d9a9f; background: #f3f6f6; font-size: 7px; letter-spacing: .08em; font-weight: 700; }
 .filter-spacer { flex: 1; }
 .refresh-info { display: flex; align-items: center; gap: 9px; color: #86949a; font-size: 9px; line-height: 1.5; white-space: nowrap; }
 .refresh-info b { color: #344b53; font-weight: 700; font-size: 10px; }
 .refresh-clock { display: grid; place-items: center; color: #73858a; width: 31px; height: 31px; background: #f4f7f7; border-radius: 8px; }
 .refresh-clock .refresh-icon { width: 15px; height: 15px; }
-
 
 .alert-banner { display: flex; align-items: center; gap: 10px; border: 1px solid #f3d8bd; background: #fffaf2; border-radius: 9px; padding: 11px 14px; margin-top: 18px; color: #77572d; font-size: 11px; }
 .alert-symbol { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #f6d9ad; color: #825718; font-weight: 800; font-size: 11px; flex: 0 0 auto; }
@@ -189,9 +192,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .side-panel.sell .offer-card.is-best .offer-price-line strong { color: #cc6657; }
 .offer-price-line span { margin-left: 3px; color: #9ba7aa; font-size: 7px; font-weight: 600; }
 .offer-meta-line { display: flex; align-items: center; gap: 4px; min-height: 18px; margin-top: 6px; }
-.payment-method-tag { display: inline-block; max-width: 48%; padding: 3px 5px; border: 1px solid #e5e9eb; border-radius: 4px; color: #5e7077; background: #f7f9fa; font-size: 7px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.payment-method-tag.is-muted { color: #8d999d; font-weight: 500; }
-.payment-method-more { color: #89969b; font-size: 7px; font-weight: 700; white-space: nowrap; }
+.aba-tag { display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border: 1px solid #e5f0eb; border-radius: 4px; color: #578373; background: #f8fcfa; font-size: 7px; font-weight: 700; white-space: nowrap; }
+.aba-tag .bank-mark { width: 11px; height: 11px; }
 .pro-tag { color: #977031; padding: 3px 4px; border-radius: 4px; background: #fff7e6; font-size: 6px; font-weight: 700; }
 .offer-divider { height: 1px; background: #edf1f1; margin: 7px 0 6px; }
 .offer-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }

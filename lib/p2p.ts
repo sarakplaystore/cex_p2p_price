@@ -47,14 +47,21 @@ export interface ExchangeQuote {
 export interface QuotesPayload {
   asset: "USDT";
   fiat: FiatCurrency;
-  paymentMethod: "all";
+  paymentMethod: "ABA Bank";
   updatedAt: string;
   refreshAfterSeconds: number;
   exchanges: ExchangeQuote[];
 }
 
+/** ABA must be a named method, not a substring of a different bank's name. */
+export function hasAbaBankPayment(paymentMethods: readonly string[]): boolean {
+  return paymentMethods.some((method) =>
+    /(?:^|[^a-z0-9])(?:aba(?:bank)?|advanced bank of asia)(?:$|[^a-z0-9])/i.test(method),
+  );
+}
+
 /**
- * Rank all valid offers by best price and keep one ad per trader.
+ * Filter to ABA-only offers, rank best price first, and keep one ad per trader.
  * For a user buying USDT, lower is better; for a user selling USDT, higher is better.
  */
 export function selectTopMerchants(
@@ -63,7 +70,12 @@ export function selectTopMerchants(
   limit = INITIAL_MERCHANT_LIMIT,
 ): P2POffer[] {
   const ranked = offers
-    .filter((offer) => Number.isFinite(offer.price) && offer.price > 0)
+    .filter(
+      (offer) =>
+        Number.isFinite(offer.price) &&
+        offer.price > 0 &&
+        hasAbaBankPayment(offer.paymentMethods),
+    )
     .slice()
     .sort((left, right) => {
       const priceOrder =
