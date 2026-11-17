@@ -104,6 +104,7 @@ function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): vo
     "tradeMethodName",
     "paymentName",
     "paymentMethodName",
+    "paymethodName",
     "methodName",
     "displayName",
     "bankName",
@@ -145,7 +146,7 @@ function paymentNamesFor(row: JsonRecord, ad: JsonRecord): string[] {
   return [...output];
 }
 
-function normalizeOffer(
+export function normalizeOffer(
   row: JsonRecord,
   exchange: ExchangeId,
   side: P2PSide,
@@ -164,17 +165,22 @@ function normalizeOffer(
     ) ??
     firstString(records, ["nickName", "nickname", "merchantName", "userName", "username"]) ??
     "P2P merchant";
-  const merchantId = firstString(traderRecords, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId"]);
+  const merchantId =
+    firstString(traderRecords, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]) ??
+    firstString(records, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]);
   const id =
     firstString(records, ["advNo", "advertisementId", "id", "itemId", "offerId"]) ??
     `${exchange}-${side}-${merchantId ?? merchantName}-${price}`;
+  const completionKeys = ["monthFinishRate", "completionRate", "recentExecuteRate", "finishRate", "successRate", "thirtyCompletionRate", "completedRate"];
   const completionRate = normalizeCompletionRate(
-    firstNumber(traderRecords, ["monthFinishRate", "completionRate", "recentExecuteRate", "finishRate", "successRate"]) ??
-      firstString(traderRecords, ["monthFinishRate", "completionRate", "recentExecuteRate", "finishRate", "successRate"]),
+    firstNumber(traderRecords, completionKeys) ??
+      firstString(traderRecords, completionKeys) ??
+      firstNumber(records, completionKeys) ??
+      firstString(records, completionKeys),
   );
   const verifiedValue = traderRecords
-    .flatMap((record) => [record.verified, record.isVerified, record.proMerchant, record.isPro])
-    .concat(records.flatMap((record) => [record.verified, record.isVerified, record.proMerchant, record.isPro]))
+    .flatMap((record) => [record.verified, record.isVerified, record.proMerchant, record.isPro, record.certifiedMerchant, record.isMerchant, record.isAuthenticatedMerchant, record.isInstitution])
+    .concat(records.flatMap((record) => [record.verified, record.isVerified, record.proMerchant, record.isPro, record.certifiedMerchant, record.isMerchant, record.isAuthenticatedMerchant, record.isInstitution]))
     .find((value) => value !== undefined && value !== null);
   const verified =
     verifiedValue === true ||
@@ -190,10 +196,12 @@ function normalizeOffer(
     price,
     fiat,
     paymentMethods: paymentNamesFor(row, ad),
-    minFiat: firstNumber(records, ["minSingleTransAmount", "minAmount", "minQuote", "minTradeLimit", "lowerLimit", "minLimit"]),
-    maxFiat: firstNumber(records, ["maxSingleTransAmount", "maxAmount", "maxQuote", "maxTradeLimit", "upperLimit", "maxLimit"]),
-    availableUsdt: firstNumber(records, ["surplusAmount", "availableAmount", "availableQuantity", "quantity", "amount"]),
-    tradeCount: firstNumber(traderRecords, ["monthOrderCount", "totalOrderCount", "orderCount", "completedOrders", "recentOrderNum", "completedTradeCount"]),
+    minFiat: firstNumber(records, ["minSingleTransAmount", "minAmount", "minQuote", "quoteMinAmountPerOrder", "minTradeLimit", "lowerLimit", "minLimit"]),
+    maxFiat: firstNumber(records, ["maxSingleTransAmount", "maxAmount", "maxQuote", "quoteMaxAmountPerOrder", "maxTradeLimit", "upperLimit", "maxLimit"]),
+    availableUsdt: firstNumber(records, ["surplusAmount", "availableAmount", "availableQuantity", "quantity", "lastAmount", "editAmount", "amount"]),
+    tradeCount:
+      firstNumber(traderRecords, ["monthOrderCount", "totalOrderCount", "orderCount", "completedOrders", "recentOrderNum", "completedTradeCount", "completedOrderQuantity", "thirtyTunoverNum", "thirtyTurnoverNum"]) ??
+      firstNumber(records, ["monthOrderCount", "totalOrderCount", "orderCount", "completedOrders", "recentOrderNum", "completedTradeCount", "completedOrderQuantity", "thirtyTunoverNum", "thirtyTurnoverNum"]),
     completionRate,
     verified,
   };
@@ -274,28 +282,29 @@ function assertSuccessfulResponse(exchange: ExchangeId, payload: unknown): void 
   }
 }
 
-async function postJson(url: string, body: unknown, headers: Record<string, string>): Promise<unknown> {
+async function requestJson(url: string, init: RequestInit): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-        ...headers,
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      signal: controller.signal,
-    });
-
+    const response = await fetch(url, { ...init, cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`Exchange returned HTTP ${response.status}`);
     return await response.json();
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function postJson(url: string, body: unknown, headers: Record<string, string>): Promise<unknown> {
+  return requestJson(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
 }
 
 const binanceUrl = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
@@ -335,10 +344,7 @@ async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecor
 
   try {
     firstRows = await requestBinance(side, fiat, ["ABA Bank"]);
-    const firstOffers = firstRows
-      .map((row) => normalizeOffer(row, "binance", side, fiat))
-      .filter((offer): offer is P2POffer => offer !== null);
-    if (firstOffers.some((offer) => hasAbaBankPayment(offer.paymentMethods))) return firstRows;
+    if (rowsContainAba(firstRows, "binance", side, fiat)) return firstRows;
   } catch (error) {
     firstError = error;
   }
@@ -353,78 +359,126 @@ async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecor
   }
 }
 
-async function requestOkx(
-  side: P2PSide,
-  fiat: FiatCurrency,
-  paymentMethod: string,
-): Promise<JsonRecord[]> {
-  const payload = await postJson(
-    "https://www.okx.com/v3/c2c/tradingOrders/getMarketplaceAdsPrelogin",
+export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
+  const apiSide = side === "buy" ? "sell" : "buy";
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null;
+  const rows = data?.[apiSide];
+  if (!Array.isArray(rows)) throw new Error(`OKX response did not include data.${apiSide}`);
+  return rows.filter(isRecord);
+}
+
+async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+  const apiSide = side === "buy" ? "sell" : "buy";
+  const params = new URLSearchParams({
+    side: apiSide,
+    paymentMethod: "all",
+    userType: "all",
+    showTrade: "false",
+    showFollow: "false",
+    showAlreadyTraded: "false",
+    isAbleFilter: "false",
+    sortType: side === "buy" ? "price_asc" : "price_desc",
+    urlId: "0",
+    limit: "100",
+    cryptoCurrency: "USDT",
+    fiatCurrency: fiat,
+    currentPage: "1",
+    numberPerPage: "20",
+    t: String(Date.now()),
+  });
+  const payload = await requestJson(
+    `https://www.okx.com/v3/c2c/tradingOrders/getMarketplaceAdsPrelogin?${params.toString()}`,
     {
-      quoteCurrency: fiat,
-      baseCurrency: "USDT",
-      side,
-      paymentMethod,
-      userType: "all",
-      showTrade: false,
-      showFollow: false,
-      showAlreadyTraded: false,
-      isExpress: false,
-      isFollowing: false,
-      isAbleFilter: false,
-      filter: ["onlyTraditional"],
-      sortType: side === "buy" ? "price_asc" : "price_desc",
-      numberPerPage: "20",
-      currentPage: "1",
-    },
-    {
-      Origin: "https://www.okx.com",
-      Referer: "https://www.okx.com/p2p-markets",
+      method: "GET",
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        Origin: "https://www.okx.com",
+        Referer: "https://www.okx.com/p2p-markets/",
+        "User-Agent": "Mozilla/5.0",
+      },
     },
   );
   assertSuccessfulResponse("okx", payload);
-  const result = findOfferRows(payload, side);
-  if (!result.found) throw new Error("OKX response did not include a P2P offer list");
-  return result.rows;
+
+  return extractOkxRows(payload, side);
 }
 
 async function okxRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  let filteredRows: JsonRecord[] | null = null;
-
-  try {
-    filteredRows = await requestOkx(side, fiat, "ABA Bank");
-    if (rowsContainAba(filteredRows, "okx", side, fiat)) return filteredRows;
-  } catch {
-    // Continue with the unfiltered public marketplace request below.
-  }
-
-  try {
-    return await requestOkx(side, fiat, "all");
-  } catch (fallbackError) {
-    if (filteredRows) return filteredRows;
-    throw fallbackError;
-  }
+  return requestOkx(side, fiat);
 }
 
-async function requestBybit(
-  side: P2PSide,
-  fiat: FiatCurrency,
-  payment: string[],
-): Promise<JsonRecord[]> {
+const BYBIT_OFFER_URL = "https://api2.bybit.com/fiat/otc/item/online";
+const BYBIT_PAYMENT_LIST_URL = "https://api2.bybit.com/fiat/otc/configuration/queryAllPaymentList";
+let bybitPaymentNameCache: { names: Map<string, string>; expiresAt: number } | null = null;
+let bybitPaymentNameRequest: Promise<Map<string, string>> | null = null;
+
+async function getBybitPaymentNameMap(): Promise<Map<string, string>> {
+  if (bybitPaymentNameCache && bybitPaymentNameCache.expiresAt > Date.now()) {
+    return bybitPaymentNameCache.names;
+  }
+  if (bybitPaymentNameRequest) return bybitPaymentNameRequest;
+
+  const request = (async () => {
+    const payload = await postJson(
+      BYBIT_PAYMENT_LIST_URL,
+      {},
+      {
+        Origin: "https://www.bybit.com",
+        Referer: "https://www.bybit.com/",
+        "User-Agent": "Mozilla/5.0",
+      },
+    );
+    assertSuccessfulResponse("bybit", payload);
+    const result = isRecord(payload) && isRecord(payload.result) ? payload.result : {};
+    const paymentConfig = Array.isArray(result.paymentConfigVo) ? result.paymentConfigVo : [];
+    const names = new Map<string, string>();
+
+    for (const item of paymentConfig) {
+      if (!isRecord(item) || item.paymentType == null || typeof item.paymentName !== "string") continue;
+      names.set(String(item.paymentType), item.paymentName);
+    }
+    if (!names.size) throw new Error("Bybit payment-method list was empty or changed schema");
+
+    bybitPaymentNameCache = { names, expiresAt: Date.now() + 6 * 60 * 60 * 1000 };
+    return names;
+  })();
+
+  bybitPaymentNameRequest = request.finally(() => {
+    bybitPaymentNameRequest = null;
+  });
+  return bybitPaymentNameRequest;
+}
+
+export function bybitAdvertiserSide(side: P2PSide): "0" | "1" {
+  return side === "buy" ? "0" : "1";
+}
+
+async function requestBybit(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
   const payload = await postJson(
-    "https://api2.bybit.com/fiat/otc/item/online",
+    BYBIT_OFFER_URL,
     {
       userId: "",
       tokenId: "USDT",
       currencyId: fiat,
-      payment,
-      side: side === "buy" ? "1" : "0",
+      payment: [],
+      // Bybit's `side` describes the advertiser: 0 sells crypto, 1 buys it.
+      side: bybitAdvertiserSide(side),
       size: "50",
       page: "1",
+      amount: "",
+      authMaker: false,
+      vaMaker: false,
+      bulkMaker: false,
+      canTrade: false,
+      verificationFilter: 0,
+      sortType: "TRADE_PRICE",
+      paymentPeriod: [],
+      itemRegion: 1,
     },
     {
       Origin: "https://www.bybit.com",
       Referer: `https://www.bybit.com/fiat/trade/otc/buy/USDT/${fiat}`,
+      "User-Agent": "Mozilla/5.0",
     },
   );
   assertSuccessfulResponse("bybit", payload);
@@ -433,28 +487,80 @@ async function requestBybit(
   return result.rows;
 }
 
+export function addBybitPaymentNames(rows: JsonRecord[], paymentNames: Map<string, string>): JsonRecord[] {
+  return rows.map((row) => {
+    const paymentIds = Array.isArray(row.payments)
+      ? row.payments
+      : Array.isArray(row.payment)
+        ? row.payment
+        : [];
+    const resolvedNames = paymentIds
+      .map((paymentId) => paymentNames.get(String(paymentId)))
+      .filter((name): name is string => Boolean(name));
+    return resolvedNames.length ? { ...row, paymentMethodNames: resolvedNames } : row;
+  });
+}
+
 async function bybitRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  let filteredRows: JsonRecord[] | null = null;
+  const [rows, paymentNames] = await Promise.all([
+    requestBybit(side, fiat),
+    getBybitPaymentNameMap().catch(() => new Map<string, string>()),
+  ]);
+  return addBybitPaymentNames(rows, paymentNames);
+}
 
-  try {
-    filteredRows = await requestBybit(side, fiat, ["ABA Bank"]);
-    if (rowsContainAba(filteredRows, "bybit", side, fiat)) return filteredRows;
-  } catch {
-    // Bybit commonly expects payment method ids; the empty list is our fallback.
-  }
+export function bitgetMarketSide(side: P2PSide): 1 | 2 {
+  return side === "buy" ? 1 : 2;
+}
 
-  try {
-    return await requestBybit(side, fiat, []);
-  } catch (fallbackError) {
-    if (filteredRows) return filteredRows;
-    throw fallbackError;
-  }
+export function extractBitgetRows(payload: unknown): JsonRecord[] {
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null;
+  if (!data || !("dataList" in data)) throw new Error("Bitget response did not include data.dataList");
+  if (data.dataList == null) return [];
+  if (!Array.isArray(data.dataList)) throw new Error("Bitget data.dataList was not an array");
+  return data.dataList.filter(isRecord);
+}
+
+async function bitgetRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+  const payload = await postJson(
+    "https://www.bitget.com/v1/p2p/pub/adv/queryAdvList",
+    {
+      // Bitget side: 1 = user buys crypto; 2 = user sells crypto.
+      side: bitgetMarketSide(side),
+      pageNo: 1,
+      pageSize: 20,
+      coinCode: "USDT",
+      fiatCode: fiat,
+      orderBy: 1,
+      adAreaId: 0,
+      orderModeFlag: "close",
+      attentionMerchantFlag: false,
+      rookieFriendlyFlag: false,
+      allowPlaceOrderFlag: "1",
+      languageType: 0,
+    },
+    {
+      Accept: "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.6",
+      Origin: "https://www.bitget.com",
+      Referer: "https://www.bitget.com/p2p-trade",
+      "User-Agent": "Mozilla/5.0",
+      apptheme: "standard",
+      locale: "en_US",
+      language: "en_US",
+      terminaltype: "1",
+      usenewpwdversion: "true",
+    },
+  );
+  assertSuccessfulResponse("bitget", payload);
+  return extractBitgetRows(payload);
 }
 
 async function fetchRows(exchange: ExchangeId, side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
   if (exchange === "binance") return binanceRows(side, fiat);
   if (exchange === "okx") return okxRows(side, fiat);
-  return bybitRows(side, fiat);
+  if (exchange === "bybit") return bybitRows(side, fiat);
+  return bitgetRows(side, fiat);
 }
 
 export async function loadSideQuote(
