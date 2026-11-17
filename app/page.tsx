@@ -311,7 +311,7 @@ export default function HomePage() {
   const updatedAt = visibleQuotes?.updatedAt ?? null;
 
   return (
-    <main className="app-shell">
+    <main id="top" className="app-shell">
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
       <div className="page-container">
@@ -332,7 +332,19 @@ export default function HomePage() {
           </div>
         </header>
 
-        <section className="hero" id="top">
+        <section className="exchange-section" aria-label="Exchange P2P offers">
+          <div className="section-heading exchange-section-heading">
+            <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
+            <div className="result-legend"><span className="legend-check">✓</span> Up to 2 distinct merchants · each side</div>
+          </div>
+          <div className="exchange-grid">
+            {EXCHANGES.map((exchange) => (
+              <ExchangeCard key={exchange.id} exchange={exchange} quote={quoteByExchange.get(exchange.id)} fiat={fiat} loading={loading} />
+            ))}
+          </div>
+        </section>
+
+        <section className="hero">
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" /> P2P MARKET OVERVIEW</div>
             <h1>Find your next<br /><span>best P2P rate.</span></h1>
@@ -389,18 +401,6 @@ export default function HomePage() {
             <SummaryCard kind="buy" title="Best price to buy" offer={bestBuy} fiat={fiat} />
             <SummaryCard kind="sell" title="Best price to sell" offer={bestSell} fiat={fiat} />
             <SummaryCard kind="spread" title="Buy / sell spread" fiat={fiat} detail={spreadDetail} />
-          </div>
-        </section>
-
-        <section className="exchange-section" aria-label="Exchange P2P offers">
-          <div className="section-heading exchange-section-heading">
-            <div><span className="section-kicker">ABA BANK MERCHANTS</span><h2>Exchange offers <span className="count-chip">{EXCHANGES.length}</span></h2></div>
-            <div className="result-legend"><span className="legend-check">✓</span> Up to 2 distinct merchants · each side</div>
-          </div>
-          <div className="exchange-grid">
-            {EXCHANGES.map((exchange) => (
-              <ExchangeCard key={exchange.id} exchange={exchange} quote={quoteByExchange.get(exchange.id)} fiat={fiat} loading={loading} />
-            ))}
           </div>
         </section>
 
