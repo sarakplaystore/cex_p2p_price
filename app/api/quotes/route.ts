@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const payload: QuotesPayload = {
     asset: "USDT",
     fiat,
-    paymentMethod: "all",
+    paymentMethod: "ABA Bank",
     updatedAt: new Date().toISOString(),
     refreshAfterSeconds: 30,
     exchanges: exchangeQuotes,
