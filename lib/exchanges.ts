@@ -1,5 +1,6 @@
 import {
   hasAbaBankPayment,
+  isWithinMakerSellPriceRange,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -572,11 +573,21 @@ export async function loadSideQuote(
     const offers = rows
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
-    const topOffers = selectTopMerchants(offers, side, MAX_MERCHANTS_PER_SIDE);
+    const excludedMakerSellAbaAd = offers.some(
+      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinMakerSellPriceRange(offer),
+    );
+    const eligibleOffers = offers.filter(isWithinMakerSellPriceRange);
+    const topOffers = selectTopMerchants(eligibleOffers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
       ? { status: "live", offers: topOffers }
-      : { status: "empty", offers: [], message: "No verifiable ABA Bank ads found." };
+      : {
+          status: "empty",
+          offers: [],
+          message: excludedMakerSellAbaAd
+            ? "Maker-sell USD ads outside $0.90–$1.015 were excluded."
+            : "No verifiable ABA Bank ads found.",
+        };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown exchange error";
     console.warn(`[P2P Radar] ${exchange} ${side} feed failed: ${reason}`);

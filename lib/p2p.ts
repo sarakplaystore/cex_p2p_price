@@ -14,6 +14,7 @@ export type QuoteStatus = "live" | "empty" | "error";
 export const INITIAL_MERCHANT_LIMIT = 2;
 export const MERCHANTS_PER_SHOW_MORE = 2;
 export const MAX_MERCHANTS_PER_SIDE = 20;
+export const USD_MAKER_SELL_PRICE_RANGE = { min: 0.9, max: 1.015 } as const;
 
 export interface P2POffer {
   id: string;
@@ -56,6 +57,16 @@ export interface QuotesPayload {
 /** Match a clearly named ABA payment method; do not treat other banks as ABA. */
 export function hasAbaBankPayment(paymentMethods: string[]): boolean {
   return paymentMethods.some((method) => /(^|[^a-z])aba([^a-z]|$)/i.test(method));
+}
+
+/**
+ * Maker sells USDT on the dashboard's Buy side. Apply the USD guard only to
+ * those offers; KHR prices and maker-buy offers use different price scales.
+ */
+export function isWithinMakerSellPriceRange(offer: P2POffer): boolean {
+  const makerSide = offer.side === "buy" ? "sell" : "buy";
+  if (offer.fiat !== "USD" || makerSide !== "sell") return true;
+  return offer.price >= USD_MAKER_SELL_PRICE_RANGE.min && offer.price <= USD_MAKER_SELL_PRICE_RANGE.max;
 }
 
 /**
