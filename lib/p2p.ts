@@ -69,6 +69,17 @@ export function isWithinMakerSellPriceRange(offer: P2POffer): boolean {
   return offer.price >= USD_OFFER_PRICE_RANGE.min && offer.price <= USD_OFFER_PRICE_RANGE.max;
 }
 
+const EXCLUDED_OKX_USD_SELL_MERCHANTS = new Set([
+  "kingxchanger001",
+  "localcambodiapayeer",
+]);
+
+/** Hide the two requested OKX USD Sell merchants, matching names case-insensitively. */
+export function isExcludedMerchant(offer: P2POffer): boolean {
+  if (offer.exchange !== "okx" || offer.fiat !== "USD" || offer.side !== "sell") return false;
+  return EXCLUDED_OKX_USD_SELL_MERCHANTS.has(offer.merchantName.trim().toLowerCase());
+}
+
 /**
  * Filter to ABA-only offers, rank best price first, and keep one ad per trader.
  * For a user buying USDT, lower is better; for a user selling USDT, higher is better.
