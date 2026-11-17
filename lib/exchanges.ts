@@ -1,6 +1,6 @@
 import {
   hasAbaBankPayment,
-  isWithinUsdPriceRange,
+  isAllowedByUsdPriceRule,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -574,9 +574,9 @@ export async function loadSideQuote(
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
     const excludedUsdAbaAd = offers.some(
-      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinUsdPriceRange(offer),
+      (offer) => hasAbaBankPayment(offer.paymentMethods) && !isAllowedByUsdPriceRule(offer),
     );
-    const eligibleOffers = offers.filter(isWithinUsdPriceRange);
+    const eligibleOffers = offers.filter(isAllowedByUsdPriceRule);
     const topOffers = selectTopMerchants(eligibleOffers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
@@ -585,7 +585,7 @@ export async function loadSideQuote(
           status: "empty",
           offers: [],
           message: excludedUsdAbaAd
-            ? "USD ABA ads outside $0.90–$1.015 were excluded."
+            ? "USD ABA ads inside $0.90–$1.015 were excluded."
             : "No verifiable ABA Bank ads found.",
         };
   } catch (error) {

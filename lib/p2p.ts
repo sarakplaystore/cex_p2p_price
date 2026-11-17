@@ -60,12 +60,12 @@ export function hasAbaBankPayment(paymentMethods: string[]): boolean {
 }
 
 /**
- * Apply the configured price guard to both USD panels. KHR prices use a
- * different scale and are not subject to this range.
+ * Keep USD offers outside the configured price band on both panels. KHR
+ * prices use a different scale and are not subject to this range.
  */
-export function isWithinUsdPriceRange(offer: P2POffer): boolean {
+export function isAllowedByUsdPriceRule(offer: P2POffer): boolean {
   if (offer.fiat !== "USD") return true;
-  return offer.price >= USD_OFFER_PRICE_RANGE.min && offer.price <= USD_OFFER_PRICE_RANGE.max;
+  return offer.price < USD_OFFER_PRICE_RANGE.min || offer.price > USD_OFFER_PRICE_RANGE.max;
 }
 
 /**
