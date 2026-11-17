@@ -1,5 +1,6 @@
 import {
   hasAbaBankPayment,
+  INITIAL_MERCHANT_LIMIT,
   isExcludedMerchant,
   isWithinMakerSellPriceRange,
   MAX_MERCHANTS_PER_SIDE,
@@ -362,6 +363,9 @@ async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecor
   }
 }
 
+// OKX returns 20 ads per page; cap pagination at 100 ads to bound request volume.
+const OKX_MAX_PAGES = 5;
+
 export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
   const apiSide = side === "buy" ? "sell" : "buy";
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null;
@@ -370,7 +374,7 @@ export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
   return rows.filter(isRecord);
 }
 
-async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+async function requestOkx(side: P2PSide, fiat: FiatCurrency, currentPage = 1): Promise<JsonRecord[]> {
   const apiSide = side === "buy" ? "sell" : "buy";
   const params = new URLSearchParams({
     side: apiSide,
@@ -385,7 +389,7 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord
     limit: "100",
     cryptoCurrency: "USDT",
     fiatCurrency: fiat,
-    currentPage: "1",
+    currentPage: String(currentPage),
     numberPerPage: "20",
     t: String(Date.now()),
   });
@@ -406,8 +410,8 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord
   return extractOkxRows(payload, side);
 }
 
-async function okxRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  return requestOkx(side, fiat);
+async function okxRows(side: P2PSide, fiat: FiatCurrency, currentPage = 1): Promise<JsonRecord[]> {
+  return requestOkx(side, fiat, currentPage);
 }
 
 const BYBIT_OFFER_URL = "https://api2.bybit.com/fiat/otc/item/online";
@@ -574,16 +578,51 @@ export async function loadSideQuote(
     const offers = rows
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
+    const selectEligibleOffers = () =>
+      selectTopMerchants(
+        offers
+          .filter(isWithinMakerSellPriceRange)
+          .filter((offer) => !isExcludedMerchant(offer)),
+        side,
+        MAX_MERCHANTS_PER_SIDE,
+      );
+    let topOffers = selectEligibleOffers();
+
+    // If exclusions leave fewer than the two cards shown initially, walk later
+    // OKX pages and stop once replacement ABA merchants are available.
+    if (
+      exchange === "okx" &&
+      side === "sell" &&
+      fiat === "USD" &&
+      rows.length > 0 &&
+      topOffers.length < INITIAL_MERCHANT_LIMIT
+    ) {
+      for (let page = 2; page <= OKX_MAX_PAGES; page += 1) {
+        try {
+          const pageRows = await okxRows(side, fiat, page);
+          if (pageRows.length === 0) break;
+
+          offers.push(
+            ...pageRows
+              .map((row) => normalizeOffer(row, exchange, side, fiat))
+              .filter((offer): offer is P2POffer => offer !== null),
+          );
+          topOffers = selectEligibleOffers();
+          if (topOffers.length >= INITIAL_MERCHANT_LIMIT) break;
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "Unknown OKX pagination error";
+          console.warn(`[P2P Radar] okx ${side} page ${page} failed; using available offers: ${reason}`);
+          break;
+        }
+      }
+    }
+
     const excludedMakerSellAbaAd = offers.some(
       (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinMakerSellPriceRange(offer),
     );
     const excludedConfiguredMerchantAbaAd = offers.some(
       (offer) => hasAbaBankPayment(offer.paymentMethods) && isExcludedMerchant(offer),
     );
-    const eligibleOffers = offers
-      .filter(isWithinMakerSellPriceRange)
-      .filter((offer) => !isExcludedMerchant(offer));
-    const topOffers = selectTopMerchants(eligibleOffers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
       ? { status: "live", offers: topOffers }
@@ -593,7 +632,7 @@ export async function loadSideQuote(
           message: excludedMakerSellAbaAd
             ? "Maker-sell USD ads outside $0.90–$1.015 were excluded."
             : excludedConfiguredMerchantAbaAd
-              ? "Configured OKX USD Sell merchants were excluded."
+              ? "No other ABA-verified OKX USD Sell offers were found after hiding the configured merchants."
               : "No verifiable ABA Bank ads found.",
         };
   } catch (error) {

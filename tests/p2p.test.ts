@@ -188,6 +188,44 @@ test("OKX USD Sell quote skips the two named merchants and starts with the next 
   }
 });
 
+test("OKX USD Sell quote paginates until replacement ABA merchants are found", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedPages: string[] = [];
+  const rowsByPage: Record<string, unknown[]> = {
+    "1": [
+      { id: "king", price: "1.350", merchantId: "okx-king", nickName: "KingXchanger001", paymentMethods: ["ABA Bank"] },
+      { id: "local", price: "1.350", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ABA Bank"] },
+    ],
+    "2": [
+      { id: "fast", price: "1.003", merchantId: "okx-fast", nickName: "Fast_sonic", paymentMethods: ["ABA Bank"] },
+    ],
+    "3": [
+      { id: "komori", price: "1.002", merchantId: "okx-komori", nickName: "Komori", paymentMethods: ["ABA Bank"] },
+    ],
+  };
+
+  globalThis.fetch = async (input) => {
+    const page = new URL(String(input)).searchParams.get("currentPage") ?? "1";
+    requestedPages.push(page);
+    return new Response(
+      JSON.stringify({ code: "0", data: { buy: rowsByPage[page] ?? [], sell: [] } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  try {
+    const quote = await loadSideQuote("okx", "sell", "USD");
+    assert.equal(quote.status, "live");
+    assert.deepEqual(requestedPages, ["1", "2", "3"]);
+    assert.deepEqual(quote.offers.slice(0, 2).map((item) => item.merchantName), [
+      "Fast_sonic",
+      "Komori",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Bybit and Bitget request the correct advertiser sides", () => {
   assert.equal(bybitAdvertiserSide("buy"), "0");
   assert.equal(bybitAdvertiserSide("sell"), "1");
