@@ -218,11 +218,11 @@ test("quotes API returns only ABA ads for every exchange, side, and fiat", async
   }
 });
 
-test("Binance's unfiltered retry still requires a listed ABA method", async (t) => {
-  const requestedPayTypes: string[][] = [];
+test("Binance stops its unfiltered sell lookup on a repeated non-ABA page", async (t) => {
+  const requests: Array<{ page: number; payTypes: string[] }> = [];
   t.mock.method(globalThis, "fetch", async (_input: RequestInfo | URL, init: RequestInit) => {
-    const { payTypes }: { payTypes: string[] } = JSON.parse(String(init.body));
-    requestedPayTypes.push(payTypes);
+    const { page, payTypes } = JSON.parse(String(init.body));
+    requests.push({ page, payTypes });
     return Response.json({
       code: "000000",
       data: payTypes.length ? [] : [{ price: "1.1", tradeMethods: [{ tradeMethodName: "Wing Money" }] }],
@@ -230,15 +230,19 @@ test("Binance's unfiltered retry still requires a listed ABA method", async (t) 
   });
 
   const quote = await loadSideQuote("binance", "sell", "USD");
-  assert.deepEqual(requestedPayTypes, [["ABA Bank"], []]);
+  assert.deepEqual(requests, [
+    { page: 1, payTypes: ["ABA Bank"] },
+    { page: 1, payTypes: [] },
+    { page: 2, payTypes: [] },
+  ]);
   assert.equal(quote.status, "empty");
   assert.deepEqual(quote.offers, []);
   assert.match(quote.message ?? "", /ABA Bank/);
 });
 
 test("Bybit and Bitget request the correct advertiser sides", () => {
-  assert.equal(bybitAdvertiserSide("buy"), "0");
-  assert.equal(bybitAdvertiserSide("sell"), "1");
+  assert.equal(bybitAdvertiserSide("buy"), "1");
+  assert.equal(bybitAdvertiserSide("sell"), "0");
   assert.equal(bitgetMarketSide("buy"), 1);
   assert.equal(bitgetMarketSide("sell"), 2);
 });
