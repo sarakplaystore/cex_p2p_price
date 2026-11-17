@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_FIAT,
   EXCHANGES,
   type ExchangeId,
   type ExchangeQuote,
@@ -222,7 +223,7 @@ function SummaryCard({
 }
 
 export default function HomePage() {
-  const [fiat, setFiat] = useState<FiatCurrency>("KHR");
+  const [fiat, setFiat] = useState<FiatCurrency>(DEFAULT_FIAT);
   const [quotes, setQuotes] = useState<QuotesPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -357,7 +358,7 @@ export default function HomePage() {
           <div className="filter-group">
             <span className="filter-label">FIAT MARKET</span>
             <div className="fiat-switch" role="group" aria-label="Select fiat currency">
-              {(["KHR", "USD"] as const).map((currency) => (
+              {(["USD", "KHR"] as const).map((currency) => (
                 <button key={currency} type="button" className={fiat === currency ? "selected" : ""} aria-pressed={fiat === currency} onClick={() => setFiat(currency)}>{currency}</button>
               ))}
             </div>

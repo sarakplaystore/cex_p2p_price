@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { loadSideQuote } from "@/lib/exchanges";
-import { EXCHANGES, type FiatCurrency, type QuotesPayload } from "@/lib/p2p";
+import { DEFAULT_FIAT, EXCHANGES, type FiatCurrency, type QuotesPayload } from "@/lib/p2p";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const requestedFiat = searchParams.get("fiat")?.toUpperCase() ?? "KHR";
+  const requestedFiat = searchParams.get("fiat")?.toUpperCase() ?? DEFAULT_FIAT;
 
   if (requestedFiat !== "USD" && requestedFiat !== "KHR") {
     return NextResponse.json(

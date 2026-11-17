@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasAbaBankPayment, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
+import { DEFAULT_FIAT, hasAbaBankPayment, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -22,6 +22,10 @@ function offer(overrides: Partial<P2POffer> = {}): P2POffer {
     ...overrides,
   };
 }
+
+test("USD is the default fiat market on first load", () => {
+  assert.equal(DEFAULT_FIAT, "USD");
+});
 
 test("ABA matching accepts ABA labels and rejects other banks", () => {
   assert.equal(hasAbaBankPayment(["ABA Bank"]), true);
