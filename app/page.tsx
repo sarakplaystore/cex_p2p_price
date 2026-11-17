@@ -183,7 +183,7 @@ function OfferSide({
       ) : (
         <div className={`empty-state ${quote?.status === "error" ? "is-error" : ""}`}>
           <span className="empty-state-icon">{quote?.status === "error" ? "!" : "—"}</span>
-          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? "No ABA Bank ads found" : "Waiting for market data"}</p>
+          <p>{quote?.status === "error" ? "Feed unavailable" : quote?.status === "empty" ? quote.message ?? "No ABA Bank ads found" : "Waiting for market data"}</p>
           <span>{quote?.status === "error" ? "Try refreshing in a moment." : "Only verified ABA payment listings are shown."}</span>
         </div>
       )}
