@@ -1,5 +1,6 @@
 import {
   hasAbaBankPayment,
+  MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
   type ExchangeId,
@@ -573,7 +574,7 @@ export async function loadSideQuote(
     const offers = rows
       .map((row) => normalizeOffer(row, exchange, side, fiat))
       .filter((offer): offer is P2POffer => offer !== null);
-    const topOffers = selectTopMerchants(offers, side, 2);
+    const topOffers = selectTopMerchants(offers, side, MAX_MERCHANTS_PER_SIDE);
 
     return topOffers.length
       ? { status: "live", offers: topOffers }

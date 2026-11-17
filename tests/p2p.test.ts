@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FIAT, hasAbaBankPayment, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
+import { DEFAULT_FIAT, hasAbaBankPayment, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -47,6 +47,22 @@ test("buy ranking uses the lowest price and returns two unique merchants", () =>
   );
 
   assert.deepEqual(result.map((item) => item.id), ["best", "next"]);
+});
+
+test("merchant selection can expand beyond the initial two up to its configured cap", () => {
+  const offers = Array.from({ length: MAX_MERCHANTS_PER_SIDE + 2 }, (_, index) =>
+    offer({
+      id: `ad-${index}`,
+      merchantId: `merchant-${index}`,
+      merchantName: `Merchant ${index}`,
+      price: 4_000 + index,
+    }),
+  );
+
+  assert.equal(selectTopMerchants(offers, "buy").length, 2);
+  const expanded = selectTopMerchants(offers, "buy", MAX_MERCHANTS_PER_SIDE);
+  assert.equal(expanded.length, MAX_MERCHANTS_PER_SIDE);
+  assert.deepEqual(expanded.slice(0, 2).map((item) => item.id), ["ad-0", "ad-1"]);
 });
 
 test("sell ranking uses the highest price and caps the result at two", () => {

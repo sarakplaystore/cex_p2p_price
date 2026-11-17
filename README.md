@@ -1,6 +1,6 @@
 # CEX P2P Price Radar
 
-A Vercel-ready dashboard for comparing the best **USDT P2P buy and sell ads** on Binance, OKX, Bybit, and Bitget. Results are restricted to offers whose payment method is identified by the exchange as **ABA Bank**. Each side shows at most two distinct merchants per exchange.
+A Vercel-ready dashboard for comparing the best **USDT P2P buy and sell ads** on Binance, OKX, Bybit, and Bitget. Results are restricted to offers whose payment method is identified by the exchange as **ABA Bank**. Each side starts with the top two distinct merchants and lets you expand the list to see more, up to 20 merchants when the exchange has enough listings.
 
 ## Run locally
 
