@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_FIAT, filterMarketPriceOutliers, hasAbaBankPayment, MAX_MERCHANTS_PER_SIDE, medianPrice, normalizeCompletionRate, selectTopMerchants, type ExchangeQuote, type P2POffer } from "../lib/p2p";
-import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
+import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
   return {
@@ -80,7 +80,7 @@ test("merchant selection can expand beyond the initial two up to its configured 
   assert.deepEqual(expanded.slice(0, 2).map((item) => item.id), ["ad-0", "ad-1"]);
 });
 
-test("market guard removes price ads more than 15% from the cross-exchange median", () => {
+test("market guard filters outliers on both buy and sell sides", () => {
   assert.equal(medianPrice([4_200, 4_100, 4_300]), 4_200);
   assert.equal(medianPrice([4_100, 4_300]), 4_200);
 
@@ -213,21 +213,40 @@ test("Bitget ad shape normalizes ABA method and merchant details", () => {
   assert.equal(hasAbaBankPayment(result.paymentMethods), true);
 });
 
-test("Bybit payment ids resolve to ABA labels before filtering", () => {
-  const [row] = addBybitPaymentNames(
-    [
-      {
-        id: "bybit-ad-1",
-        price: "4101",
-        payments: ["19"],
-        userInfo: { userId: "bybit-user-1", nickName: "Bybit Trader" },
-      },
-    ],
-    new Map([["19", "ABA Bank"]]),
-  );
+test("Bybit result.items ads normalize with ABA payment names", () => {
+  const rows = extractBybitRows({
+    ret_code: 0,
+    result: {
+      items: [
+        {
+          id: "bybit-ad-1",
+          price: "4101",
+          minAmount: "10000",
+          maxAmount: "500000",
+          quantity: "250",
+          payments: ["19"],
+          userInfo: {
+            userId: "bybit-user-1",
+            nickName: "Bybit Trader",
+            recentOrderNum: 120,
+            recentExecuteRate: "0.98",
+          },
+        },
+      ],
+    },
+  });
+  const [row] = addBybitPaymentNames(rows, new Map([["19", "ABA Bank"]]));
   const result = row && normalizeOffer(row, "bybit", "buy", "KHR");
 
+  assert.throws(() => extractBybitRows({ result: { items: {} } }), /not an array/);
   assert.ok(result);
   assert.equal(result.merchantId, "bybit-user-1");
+  assert.equal(result.merchantName, "Bybit Trader");
+  assert.equal(result.price, 4101);
+  assert.equal(result.minFiat, 10000);
+  assert.equal(result.maxFiat, 500000);
+  assert.equal(result.availableUsdt, 250);
+  assert.equal(result.tradeCount, 120);
+  assert.equal(result.completionRate, 98);
   assert.equal(hasAbaBankPayment(result.paymentMethods), true);
 });

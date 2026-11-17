@@ -454,6 +454,13 @@ export function bybitAdvertiserSide(side: P2PSide): "0" | "1" {
   return side === "buy" ? "0" : "1";
 }
 
+export function extractBybitRows(payload: unknown): JsonRecord[] {
+  const result = isRecord(payload) && isRecord(payload.result) ? payload.result : null;
+  if (!result || !("items" in result)) throw new Error("Bybit response did not include result.items");
+  if (!Array.isArray(result.items)) throw new Error("Bybit result.items was not an array");
+  return result.items.filter(isRecord);
+}
+
 async function requestBybit(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
   const payload = await postJson(
     BYBIT_OFFER_URL,
@@ -461,31 +468,22 @@ async function requestBybit(side: P2PSide, fiat: FiatCurrency): Promise<JsonReco
       userId: "",
       tokenId: "USDT",
       currencyId: fiat,
-      payment: [],
       // Bybit's `side` describes the advertiser: 0 sells crypto, 1 buys it.
       side: bybitAdvertiserSide(side),
-      size: "50",
       page: "1",
-      amount: "",
+      size: "20",
+      payment: [],
       authMaker: false,
-      vaMaker: false,
-      bulkMaker: false,
       canTrade: false,
-      verificationFilter: 0,
-      sortType: "TRADE_PRICE",
-      paymentPeriod: [],
-      itemRegion: 1,
     },
     {
       Origin: "https://www.bybit.com",
-      Referer: `https://www.bybit.com/fiat/trade/otc/buy/USDT/${fiat}`,
+      Referer: "https://www.bybit.com/",
       "User-Agent": "Mozilla/5.0",
     },
   );
   assertSuccessfulResponse("bybit", payload);
-  const result = findOfferRows(payload, side);
-  if (!result.found) throw new Error("Bybit response did not include a P2P offer list");
-  return result.rows;
+  return extractBybitRows(payload);
 }
 
 export function addBybitPaymentNames(rows: JsonRecord[], paymentNames: Map<string, string>): JsonRecord[] {
