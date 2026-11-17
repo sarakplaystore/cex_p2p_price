@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FIAT, hasAbaBankPayment, isExcludedMerchant, isWithinMakerSellPriceRange, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, USD_OFFER_PRICE_RANGE, type P2POffer } from "../lib/p2p";
+import { DEFAULT_BLOCKED_MERCHANTS, DEFAULT_FIAT, hasAbaBankPayment, isMerchantBlocked, isWithinMakerSellPriceRange, MAX_BLOCKED_MERCHANTS, MAX_MERCHANTS_PER_SIDE, normalizeBlockedMerchantNames, normalizeCompletionRate, selectTopMerchants, USD_OFFER_PRICE_RANGE, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, loadSideQuote, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -48,16 +48,23 @@ test("USD offers inside the range remain eligible; only maker-sell ads are range
   assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "KHR", side: "buy", price: 4_100 })), true);
 });
 
-test("merchant blacklist matches names but is limited to OKX USD Sell offers", () => {
-  const okxUsdSell = (merchantName: string) =>
-    offer({ exchange: "okx", side: "sell", fiat: "USD", merchantName });
+test("merchant blocklist matches names globally and normalizes user input", () => {
+  assert.deepEqual(DEFAULT_BLOCKED_MERCHANTS, ["KingXchanger001", "Localcambodiapayeer"]);
+  const normalized = normalizeBlockedMerchantNames([
+    " KingXchanger001 ",
+    "kingxchanger001",
+    "Localcambodiapayeer",
+    "",
+    "x".repeat(81),
+    123,
+  ]);
+  assert.deepEqual(normalized, ["KingXchanger001", "Localcambodiapayeer"]);
 
-  assert.equal(isExcludedMerchant(okxUsdSell("KingXchanger001")), true);
-  assert.equal(isExcludedMerchant(okxUsdSell(" Localcambodiapayeer ")), true);
-  assert.equal(isExcludedMerchant(okxUsdSell("Fast_sonic")), false);
-  assert.equal(isExcludedMerchant(offer({ exchange: "okx", side: "buy", fiat: "USD", merchantName: "KingXchanger001" })), false);
-  assert.equal(isExcludedMerchant(offer({ exchange: "okx", side: "sell", fiat: "KHR", merchantName: "KingXchanger001" })), false);
-  assert.equal(isExcludedMerchant(offer({ exchange: "binance", side: "sell", fiat: "USD", merchantName: "KingXchanger001" })), false);
+  assert.equal(isMerchantBlocked(offer({ merchantName: " kingxchanger001 " }), normalized), true);
+  assert.equal(isMerchantBlocked(offer({ exchange: "okx", side: "sell", fiat: "USD", merchantName: "LOCALCAMBODIAPAYEER" }), normalized), true);
+  assert.equal(isMerchantBlocked(offer({ exchange: "bitget", side: "sell", fiat: "USD", merchantName: "Fast_sonic" }), normalized), false);
+  assert.deepEqual(normalizeBlockedMerchantNames(null), []);
+  assert.equal(normalizeBlockedMerchantNames(Array.from({ length: MAX_BLOCKED_MERCHANTS + 5 }, (_, index) => `M${index}`)).length, MAX_BLOCKED_MERCHANTS);
 });
 
 test("buy ranking uses the lowest price and returns two unique merchants", () => {
@@ -183,6 +190,34 @@ test("OKX USD Sell quote skips the two named merchants and starts with the next 
       "MENGYLFONG",
     ]);
     assert.equal(quote.offers.some((item) => item.id === "king" || item.id === "local"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an empty merchant blocklist allows the default OKX merchants again", async () => {
+  const originalFetch = globalThis.fetch;
+  const payload = {
+    code: "0",
+    data: {
+      buy: [
+        { id: "king", price: "1.350", merchantId: "okx-king", nickName: "KingXchanger001", paymentMethods: ["ABA Bank"] },
+        { id: "local", price: "1.350", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ABA Bank"] },
+      ],
+      sell: [],
+    },
+  };
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    const quote = await loadSideQuote("okx", "sell", "USD", []);
+    assert.equal(quote.status, "live");
+    assert.deepEqual(quote.offers.map((item) => item.merchantName), [
+      "KingXchanger001",
+      "Localcambodiapayeer",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

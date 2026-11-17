@@ -1,7 +1,8 @@
 import {
+  DEFAULT_BLOCKED_MERCHANTS,
   hasAbaBankPayment,
   INITIAL_MERCHANT_LIMIT,
-  isExcludedMerchant,
+  isMerchantBlocked,
   isWithinMakerSellPriceRange,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
@@ -572,6 +573,7 @@ export async function loadSideQuote(
   exchange: ExchangeId,
   side: P2PSide,
   fiat: FiatCurrency,
+  blockedMerchantNames: readonly string[] = DEFAULT_BLOCKED_MERCHANTS,
 ): Promise<SideQuote> {
   try {
     const rows = await fetchRows(exchange, side, fiat);
@@ -582,7 +584,7 @@ export async function loadSideQuote(
       selectTopMerchants(
         offers
           .filter(isWithinMakerSellPriceRange)
-          .filter((offer) => !isExcludedMerchant(offer)),
+          .filter((offer) => !isMerchantBlocked(offer, blockedMerchantNames)),
         side,
         MAX_MERCHANTS_PER_SIDE,
       );
@@ -620,8 +622,10 @@ export async function loadSideQuote(
     const excludedMakerSellAbaAd = offers.some(
       (offer) => hasAbaBankPayment(offer.paymentMethods) && !isWithinMakerSellPriceRange(offer),
     );
-    const excludedConfiguredMerchantAbaAd = offers.some(
-      (offer) => hasAbaBankPayment(offer.paymentMethods) && isExcludedMerchant(offer),
+    const excludedBlockedMerchantAbaAd = offers.some(
+      (offer) =>
+        hasAbaBankPayment(offer.paymentMethods) &&
+        isMerchantBlocked(offer, blockedMerchantNames),
     );
 
     return topOffers.length
@@ -631,8 +635,8 @@ export async function loadSideQuote(
           offers: [],
           message: excludedMakerSellAbaAd
             ? "Maker-sell USD ads outside $0.90–$1.015 were excluded."
-            : excludedConfiguredMerchantAbaAd
-              ? "No other ABA-verified OKX USD Sell offers were found after hiding the configured merchants."
+            : excludedBlockedMerchantAbaAd
+              ? "No other eligible ABA offers were found after applying the merchant blocklist."
               : "No verifiable ABA Bank ads found.",
         };
   } catch (error) {
