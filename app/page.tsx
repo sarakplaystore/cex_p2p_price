@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  DEFAULT_BLOCKED_MERCHANTS,
   DEFAULT_FIAT,
   EXCHANGES,
+  isMerchantBlocked,
+  MAX_BLOCKED_MERCHANTS,
+  normalizeBlockedMerchantNames,
   INITIAL_MERCHANT_LIMIT,
   MERCHANTS_PER_SHOW_MORE,
   type ExchangeId,
@@ -16,6 +20,46 @@ import {
 } from "@/lib/p2p";
 
 const REFRESH_MS = 30_000;
+const BLOCKLIST_STORAGE_KEY = "p2p-radar-merchant-blocklist-v1";
+const NO_BLOCKED_MERCHANTS: readonly string[] = [];
+
+type MerchantBlocklistSettings = {
+  enabled: boolean;
+  names: string[];
+};
+
+function defaultBlocklistSettings(): MerchantBlocklistSettings {
+  return { enabled: true, names: [...DEFAULT_BLOCKED_MERCHANTS] };
+}
+
+function readBlocklistSettings(): MerchantBlocklistSettings {
+  try {
+    const raw = window.localStorage.getItem(BLOCKLIST_STORAGE_KEY);
+    if (raw === null) return defaultBlocklistSettings();
+
+    const stored: unknown = JSON.parse(raw);
+    if (Array.isArray(stored)) {
+      return { enabled: true, names: normalizeBlockedMerchantNames(stored) };
+    }
+    if (typeof stored !== "object" || stored === null) return defaultBlocklistSettings();
+
+    const settings = stored as { enabled?: unknown; names?: unknown };
+    return {
+      enabled: typeof settings.enabled === "boolean" ? settings.enabled : true,
+      names: normalizeBlockedMerchantNames(settings.names),
+    };
+  } catch {
+    return defaultBlocklistSettings();
+  }
+}
+
+function hideBlockedOffers(quote: SideQuote, blockedNames: readonly string[]): SideQuote {
+  if (quote.status !== "live" || blockedNames.length === 0) return quote;
+  const offers = quote.offers.filter((offer) => !isMerchantBlocked(offer, blockedNames));
+  return offers.length > 0
+    ? { ...quote, offers }
+    : { status: "empty", offers: [], message: "All returned offers are in your merchant blocklist." };
+}
 
 function formatPrice(value: number, fiat: FiatCurrency): string {
   const digits = fiat === "USD" ? 4 : 0;
@@ -191,6 +235,79 @@ function OfferSide({
   );
 }
 
+function MerchantBlocklistPanel({
+  settings,
+  onChange,
+}: {
+  settings: MerchantBlocklistSettings;
+  onChange: (settings: MerchantBlocklistSettings) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const trimmedDraft = draft.trim();
+  const duplicate = settings.names.some((name) => name.toLowerCase() === trimmedDraft.toLowerCase());
+  const canAdd = trimmedDraft.length > 0 && !duplicate && settings.names.length < MAX_BLOCKED_MERCHANTS;
+
+  function addMerchant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canAdd) return;
+    onChange({
+      ...settings,
+      names: normalizeBlockedMerchantNames([...settings.names, trimmedDraft]),
+    });
+    setDraft("");
+  }
+
+  function removeMerchant(name: string) {
+    onChange({
+      ...settings,
+      names: settings.names.filter((item) => item.toLowerCase() !== name.toLowerCase()),
+    });
+  }
+
+  return (
+    <section className="merchant-blocklist-panel" aria-label="Merchant blocklist">
+      <div className="merchant-blocklist-header">
+        <div>
+          <span className="section-kicker">MERCHANT FILTER</span>
+          <h2>Blocklist <span className="blocklist-count">{settings.names.length}/{MAX_BLOCKED_MERCHANTS}</span></h2>
+          <p>Hide exact merchant names across all exchanges and both sides.</p>
+        </div>
+        <button
+          className={`blocklist-mode-toggle ${settings.enabled ? "is-active" : ""}`}
+          type="button"
+          aria-pressed={settings.enabled}
+          onClick={() => onChange({ ...settings, enabled: !settings.enabled })}
+        >
+          <span className="blocklist-mode-dot" />
+          Block mode {settings.enabled ? "on" : "off"}
+        </button>
+      </div>
+      <form className="blocklist-add-form" onSubmit={addMerchant}>
+        <label className="sr-only" htmlFor="merchant-blocklist-input">Merchant name to block</label>
+        <input
+          id="merchant-blocklist-input"
+          type="text"
+          maxLength={80}
+          value={draft}
+          placeholder="Type a merchant name"
+          onChange={(event) => setDraft(event.target.value)}
+          disabled={settings.names.length >= MAX_BLOCKED_MERCHANTS}
+        />
+        <button type="submit" disabled={!canAdd}>Add merchant</button>
+      </form>
+      <div className="merchant-blocklist-list" aria-label="Blocked merchants">
+        {settings.names.length > 0 ? settings.names.map((name) => (
+          <span className="merchant-blocklist-chip" key={name.toLowerCase()}>
+            {name}
+            <button type="button" aria-label={`Remove ${name} from blocklist`} onClick={() => removeMerchant(name)}>×</button>
+          </span>
+        )) : <span className="merchant-blocklist-empty">No merchant names blocked.</span>}
+      </div>
+      <p className="merchant-blocklist-note">Names are matched case-insensitively. Changes are saved in this browser.</p>
+    </section>
+  );
+}
+
 function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EXCHANGES)[number]; quote: ExchangeQuote | undefined; fiat: FiatCurrency; loading: boolean }) {
   const isLive = quote?.buy.status === "live" || quote?.sell.status === "live";
   const isError = quote?.buy.status === "error" || quote?.sell.status === "error";
@@ -253,9 +370,24 @@ export default function HomePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [blocklistSettings, setBlocklistSettings] = useState<MerchantBlocklistSettings | null>(null);
   const lastSuccessfulFiat = useRef<FiatCurrency | null>(null);
 
   useEffect(() => {
+    setBlocklistSettings(readBlocklistSettings());
+  }, []);
+
+  useEffect(() => {
+    if (!blocklistSettings) return;
+    try {
+      window.localStorage.setItem(BLOCKLIST_STORAGE_KEY, JSON.stringify(blocklistSettings));
+    } catch {
+      // Filtering still works for the current session if storage is unavailable.
+    }
+  }, [blocklistSettings]);
+
+  useEffect(() => {
+    if (!blocklistSettings) return;
     let active = true;
     let inFlight = false;
     let controller: AbortController | null = null;
@@ -269,7 +401,13 @@ export default function HomePage() {
       setFetchError(null);
 
       try {
-        const response = await fetch(`/api/quotes?fiat=${fiat}`, {
+        const response = await fetch("/api/quotes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fiat,
+            blockedMerchants: blocklistSettings.enabled ? blocklistSettings.names : [],
+          }),
           cache: "no-store",
           signal: controller.signal,
         });
@@ -302,9 +440,23 @@ export default function HomePage() {
       window.clearInterval(interval);
       controller?.abort();
     };
-  }, [fiat, refreshKey]);
+  }, [fiat, refreshKey, blocklistSettings]);
 
-  const visibleQuotes = quotes?.fiat === fiat ? quotes : null;
+  const activeBlockedMerchants = blocklistSettings?.enabled
+    ? blocklistSettings.names
+    : NO_BLOCKED_MERCHANTS;
+  const visibleQuotes = useMemo(() => {
+    if (quotes?.fiat !== fiat) return null;
+    if (activeBlockedMerchants.length === 0) return quotes;
+    return {
+      ...quotes,
+      exchanges: quotes.exchanges.map((exchange) => ({
+        ...exchange,
+        buy: hideBlockedOffers(exchange.buy, activeBlockedMerchants),
+        sell: hideBlockedOffers(exchange.sell, activeBlockedMerchants),
+      })),
+    };
+  }, [quotes, fiat, activeBlockedMerchants]);
   const quoteByExchange = useMemo(() => {
     const map = new Map<ExchangeId, ExchangeQuote>();
     for (const quote of visibleQuotes?.exchanges ?? []) map.set(quote.id, quote);
@@ -407,6 +559,13 @@ export default function HomePage() {
           <div className="filter-spacer" />
           <div className="refresh-info"><span className="refresh-clock"><RefreshIcon /></span><span>Auto refresh<br /><b>Every 30 seconds</b></span></div>
         </section>
+
+        {blocklistSettings ? (
+          <MerchantBlocklistPanel
+            settings={blocklistSettings}
+            onChange={(settings) => setBlocklistSettings(settings)}
+          />
+        ) : null}
 
         {fetchError ? (
           <div className="alert-banner" role="status">
