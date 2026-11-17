@@ -34,14 +34,17 @@ test("ABA matching accepts ABA labels and rejects other banks", () => {
   assert.equal(hasAbaBankPayment(["ABACUS Exchange"]), false);
 });
 
-test("USD maker-sell ads must fall within the configured price range", () => {
+test("USD offers inside the range remain eligible; only maker-sell ads are range-limited", () => {
   const makerSell = (price: number) => offer({ fiat: "USD", side: "buy", price });
+  const makerBuy = (price: number) => offer({ fiat: "USD", side: "sell", price });
 
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.min)), true);
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.max)), true);
+  for (const boundary of [USD_OFFER_PRICE_RANGE.min, USD_OFFER_PRICE_RANGE.max]) {
+    assert.equal(isWithinMakerSellPriceRange(makerSell(boundary)), true);
+    assert.equal(isWithinMakerSellPriceRange(makerBuy(boundary)), true);
+  }
   assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.min - 0.001)), false);
   assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.max + 0.001)), false);
-  assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "USD", side: "sell", price: 0.5 })), true);
+  assert.equal(isWithinMakerSellPriceRange(makerBuy(0.5)), true);
   assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "KHR", side: "buy", price: 4_100 })), true);
 });
 
