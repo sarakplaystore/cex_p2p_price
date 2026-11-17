@@ -85,7 +85,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .hero-aside-rate span:last-child { color: #54d2aa; }
 .rate-arrow { color: #75928f; font-size: 18px; }
 .hero-aside-foot { display: flex; align-items: center; gap: 7px; border-top: 1px solid rgba(208, 236, 226, .11); padding-top: 12px; color: #abc0be; font-size: 9px; font-weight: 600; }
-.hero-aside-foot .bank-mark { width: 15px; height: 15px; color: #52d1a5; }
 .foot-dot { width: 3px; height: 3px; border-radius: 50%; background: #5b9183; margin: 0 1px 0 3px; }
 
 .controls-card { min-height: 91px; display: flex; align-items: center; gap: 25px; padding: 16px 23px; border: 1px solid #e6ecec; border-radius: 13px; background: rgba(255,255,255,.96); margin-top: -24px; position: relative; z-index: 3; box-shadow: 0 10px 25px rgba(16, 45, 54, .045); }
@@ -102,39 +101,13 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .fiat-switch button.selected { color: #087f62; background: #fff; box-shadow: 0 1px 4px rgba(22, 52, 58, .1); }
 .payment-filter { min-width: 160px; }
 .payment-value { display: flex; align-items: center; gap: 8px; color: #20333a; font-size: 11px; }
-.bank-mark { display: inline-grid; width: 19px; height: 19px; place-items: center; color: #128569; flex: 0 0 auto; }
-.bank-mark svg { width: 100%; height: 100%; }
 .payment-value strong { font-weight: 700; }
-.fixed-chip { padding: 3px 5px; border-radius: 4px; color: #8d9a9f; background: #f3f6f6; font-size: 7px; letter-spacing: .08em; font-weight: 700; }
 .filter-spacer { flex: 1; }
 .refresh-info { display: flex; align-items: center; gap: 9px; color: #86949a; font-size: 9px; line-height: 1.5; white-space: nowrap; }
 .refresh-info b { color: #344b53; font-weight: 700; font-size: 10px; }
 .refresh-clock { display: grid; place-items: center; color: #73858a; width: 31px; height: 31px; background: #f4f7f7; border-radius: 8px; }
 .refresh-clock .refresh-icon { width: 15px; height: 15px; }
 
-.merchant-blocklist-panel { display: grid; gap: 12px; margin-top: 12px; padding: 16px 19px; border: 1px solid #e6ecec; border-radius: 13px; background: rgba(255,255,255,.96); box-shadow: 0 6px 18px rgba(16, 45, 54, .035); }
-.merchant-blocklist-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.merchant-blocklist-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: #172a33; font-family: var(--display-font); font-size: 16px; letter-spacing: -.03em; }
-.merchant-blocklist-header p { margin: 5px 0 0; color: #839198; font-size: 10px; }
-.blocklist-count { display: inline-grid; place-items: center; min-width: 29px; height: 19px; padding: 0 5px; border-radius: 6px; background: #f0f5f4; color: #71808a; font-family: var(--body-font); font-size: 9px; letter-spacing: 0; }
-.blocklist-mode-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid #e2e9e8; border-radius: 999px; background: #f6f8f8; color: #75858b; font-size: 10px; font-weight: 700; white-space: nowrap; transition: .16s; }
-.blocklist-mode-toggle:hover { border-color: #b9d9d0; }
-.blocklist-mode-toggle.is-active { border-color: #bde6d7; background: #effaf5; color: #0b8867; }
-.blocklist-mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa6ab; }
-.blocklist-mode-toggle.is-active .blocklist-mode-dot { background: #10a981; box-shadow: 0 0 0 3px rgba(16, 169, 129, .12); }
-.blocklist-add-form { display: flex; gap: 8px; max-width: 580px; }
-.blocklist-add-form input { flex: 1; min-width: 0; height: 36px; padding: 0 11px; border: 1px solid #e0e7e6; border-radius: 8px; background: #fff; color: #20333a; font-size: 11px; outline: none; }
-.blocklist-add-form input:focus { border-color: #7bcbb0; box-shadow: 0 0 0 3px rgba(16, 169, 129, .1); }
-.blocklist-add-form input::placeholder { color: #a2adb1; }
-.blocklist-add-form button { padding: 0 14px; border: 1px solid #0d8e6c; border-radius: 8px; background: #0d8e6c; color: #fff; font-size: 10px; font-weight: 700; white-space: nowrap; transition: .16s; }
-.blocklist-add-form button:hover:not(:disabled) { background: #087d60; border-color: #087d60; }
-.blocklist-add-form button:disabled { opacity: .45; cursor: not-allowed; }
-.merchant-blocklist-list { display: flex; flex-wrap: wrap; gap: 7px; }
-.merchant-blocklist-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 5px 6px 5px 10px; border: 1px solid #e3eae8; border-radius: 7px; background: #f7faf9; color: #40565d; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
-.merchant-blocklist-chip button { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #85939a; font-size: 15px; line-height: 1; }
-.merchant-blocklist-chip button:hover { background: #ffecea; color: #c45a4b; }
-.merchant-blocklist-empty, .merchant-blocklist-note { color: #8d9a9f; font-size: 9px; }
-.merchant-blocklist-note { margin: -4px 0 0; }
 
 .alert-banner { display: flex; align-items: center; gap: 10px; border: 1px solid #f3d8bd; background: #fffaf2; border-radius: 9px; padding: 11px 14px; margin-top: 18px; color: #77572d; font-size: 11px; }
 .alert-symbol { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #f6d9ad; color: #825718; font-weight: 800; font-size: 11px; flex: 0 0 auto; }
@@ -216,8 +189,9 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .side-panel.sell .offer-card.is-best .offer-price-line strong { color: #cc6657; }
 .offer-price-line span { margin-left: 3px; color: #9ba7aa; font-size: 7px; font-weight: 600; }
 .offer-meta-line { display: flex; align-items: center; gap: 4px; min-height: 18px; margin-top: 6px; }
-.aba-tag { display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border: 1px solid #e5f0eb; border-radius: 4px; color: #578373; background: #f8fcfa; font-size: 7px; font-weight: 700; white-space: nowrap; }
-.aba-tag .bank-mark { width: 11px; height: 11px; }
+.payment-method-tag { display: inline-block; max-width: 48%; padding: 3px 5px; border: 1px solid #e5e9eb; border-radius: 4px; color: #5e7077; background: #f7f9fa; font-size: 7px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payment-method-tag.is-muted { color: #8d999d; font-weight: 500; }
+.payment-method-more { color: #89969b; font-size: 7px; font-weight: 700; white-space: nowrap; }
 .pro-tag { color: #977031; padding: 3px 4px; border-radius: 4px; background: #fff7e6; font-size: 6px; font-weight: 700; }
 .offer-divider { height: 1px; background: #edf1f1; margin: 7px 0 6px; }
 .offer-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
@@ -268,7 +242,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .hero h1 { font-size: 38px; }
   .hero-copy p { max-width: 340px; }
   .controls-card { margin-top: -20px; flex-wrap: wrap; gap: 13px 19px; padding: 15px 17px; }
-  .merchant-blocklist-panel { padding: 14px 16px; }
   .filter-group { min-width: 105px; }
   .filter-divider { height: 34px; }
   .payment-filter { min-width: 140px; }
@@ -297,11 +270,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .hero-aside { position: absolute; width: 180px; right: -5px; bottom: -7px; margin: 0; opacity: .32; transform: scale(.78); }
   .eyebrow { font-size: 8px; }
   .controls-card { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 13px; padding: 14px; }
-  .merchant-blocklist-panel { gap: 10px; padding: 13px; }
-  .merchant-blocklist-header { align-items: flex-start; flex-direction: column; }
-  .blocklist-mode-toggle { align-self: flex-start; }
-  .blocklist-add-form { max-width: none; }
-  .blocklist-add-form button { padding: 0 10px; }
   .controls-card .filter-divider:nth-of-type(2) { display: none; }
   .filter-group { min-width: 0; }
   .payment-filter { grid-column: 1 / 3; min-width: 0; }

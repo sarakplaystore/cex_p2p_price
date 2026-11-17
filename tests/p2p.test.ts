@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_BLOCKED_MERCHANTS, DEFAULT_FIAT, hasAbaBankPayment, isMerchantBlocked, isWithinMakerSellPriceRange, MAX_BLOCKED_MERCHANTS, MAX_MERCHANTS_PER_SIDE, normalizeBlockedMerchantNames, normalizeCompletionRate, selectTopMerchants, USD_OFFER_PRICE_RANGE, type P2POffer } from "../lib/p2p";
+import { DEFAULT_FIAT, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, loadSideQuote, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -27,47 +27,7 @@ test("USD is the default fiat market on first load", () => {
   assert.equal(DEFAULT_FIAT, "USD");
 });
 
-test("ABA matching accepts ABA labels and rejects other banks", () => {
-  assert.equal(hasAbaBankPayment(["ABA Bank"]), true);
-  assert.equal(hasAbaBankPayment(["ABA Mobile Transfer"]), true);
-  assert.equal(hasAbaBankPayment(["ACLEDA Bank"]), false);
-  assert.equal(hasAbaBankPayment(["ABACUS Exchange"]), false);
-});
-
-test("USD offers inside the range remain eligible; only maker-sell ads are range-limited", () => {
-  const makerSell = (price: number) => offer({ fiat: "USD", side: "buy", price });
-  const makerBuy = (price: number) => offer({ fiat: "USD", side: "sell", price });
-
-  for (const boundary of [USD_OFFER_PRICE_RANGE.min, USD_OFFER_PRICE_RANGE.max]) {
-    assert.equal(isWithinMakerSellPriceRange(makerSell(boundary)), true);
-    assert.equal(isWithinMakerSellPriceRange(makerBuy(boundary)), true);
-  }
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.min - 0.001)), false);
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_OFFER_PRICE_RANGE.max + 0.001)), false);
-  assert.equal(isWithinMakerSellPriceRange(makerBuy(0.5)), true);
-  assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "KHR", side: "buy", price: 4_100 })), true);
-});
-
-test("merchant blocklist matches names globally and normalizes user input", () => {
-  assert.deepEqual(DEFAULT_BLOCKED_MERCHANTS, ["KingXchanger001", "Localcambodiapayeer"]);
-  const normalized = normalizeBlockedMerchantNames([
-    " KingXchanger001 ",
-    "kingxchanger001",
-    "Localcambodiapayeer",
-    "",
-    "x".repeat(81),
-    123,
-  ]);
-  assert.deepEqual(normalized, ["KingXchanger001", "Localcambodiapayeer"]);
-
-  assert.equal(isMerchantBlocked(offer({ merchantName: " kingxchanger001 " }), normalized), true);
-  assert.equal(isMerchantBlocked(offer({ exchange: "okx", side: "sell", fiat: "USD", merchantName: "LOCALCAMBODIAPAYEER" }), normalized), true);
-  assert.equal(isMerchantBlocked(offer({ exchange: "bitget", side: "sell", fiat: "USD", merchantName: "Fast_sonic" }), normalized), false);
-  assert.deepEqual(normalizeBlockedMerchantNames(null), []);
-  assert.equal(normalizeBlockedMerchantNames(Array.from({ length: MAX_BLOCKED_MERCHANTS + 5 }, (_, index) => `M${index}`)).length, MAX_BLOCKED_MERCHANTS);
-});
-
-test("buy ranking uses the lowest price and returns two unique merchants", () => {
+test("buy ranking includes non-ABA payment methods and uses the lowest price", () => {
   const result = selectTopMerchants(
     [
       offer({ id: "high", merchantId: "m1", merchantName: "One", price: 4_300 }),
@@ -79,7 +39,7 @@ test("buy ranking uses the lowest price and returns two unique merchants", () =>
     "buy",
   );
 
-  assert.deepEqual(result.map((item) => item.id), ["best", "next"]);
+  assert.deepEqual(result.map((item) => item.id), ["wrong-bank", "best"]);
 });
 
 test("merchant selection can expand beyond the initial two up to its configured cap", () => {
@@ -130,15 +90,16 @@ test("OKX user buy/sell selects the matching advertiser-side list", () => {
   assert.equal(extractOkxRows(payload, "sell")[0]?.id, "advertiser-buys");
 });
 
-test("OKX USD ABA maker-sell ads inside the inclusive range survive quote loading", async () => {
+test("OKX USD buy quote includes all payment methods and prices outside the former range", async () => {
   const originalFetch = globalThis.fetch;
   const payload = {
     code: "0",
     data: {
       sell: [
-        { id: "okx-min", price: "0.9", merchantId: "okx-min-merchant", nickName: "Min", paymentMethods: ["ABA Bank"] },
-        { id: "okx-max", price: "1.015", merchantId: "okx-max-merchant", nickName: "Max", paymentMethods: ["ABA Bank"] },
-        { id: "okx-outside", price: "1.016", merchantId: "okx-outside-merchant", nickName: "Outside", paymentMethods: ["ABA Bank"] },
+        { id: "below-range", price: "0.89", merchantId: "below-merchant", nickName: "Below", paymentMethods: ["ACLEDA Bank"] },
+        { id: "range-min", price: "0.9", merchantId: "min-merchant", nickName: "Min", paymentMethods: ["ABA Bank"] },
+        { id: "range-max", price: "1.015", merchantId: "max-merchant", nickName: "Max", paymentMethods: ["ABA Bank"] },
+        { id: "above-range", price: "1.016", merchantId: "above-merchant", nickName: "Above", paymentMethods: ["Wing Money"] },
       ],
       buy: [],
     },
@@ -153,23 +114,28 @@ test("OKX USD ABA maker-sell ads inside the inclusive range survive quote loadin
   try {
     const quote = await loadSideQuote("okx", "buy", "USD");
     assert.equal(quote.status, "live");
-    assert.deepEqual(quote.offers.map((item) => item.id), ["okx-min", "okx-max"]);
+    assert.deepEqual(quote.offers.map((item) => item.id), [
+      "below-range",
+      "range-min",
+      "range-max",
+      "above-range",
+    ]);
+    assert.equal(quote.offers[0]?.paymentMethods[0], "ACLEDA Bank");
+    assert.equal(quote.offers[3]?.paymentMethods[0], "Wing Money");
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("OKX USD Sell quote skips the two named merchants and starts with the next offers", async () => {
+test("OKX USD Sell quote keeps merchants that were previously blocklisted", async () => {
   const originalFetch = globalThis.fetch;
   const payload = {
     code: "0",
     data: {
       buy: [
         { id: "king", price: "1.350", merchantId: "okx-king", nickName: "KingXchanger001", paymentMethods: ["ABA Bank"] },
-        { id: "local", price: "1.350", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ABA Bank"] },
-        { id: "fast", price: "1.003", merchantId: "okx-fast", nickName: "Fast_sonic", paymentMethods: ["ABA Bank"] },
-        { id: "komori", price: "1.003", merchantId: "okx-komori", nickName: "Komori", paymentMethods: ["ABA Bank"] },
-        { id: "mengly", price: "1.002", merchantId: "okx-mengly", nickName: "MENGYLFONG", paymentMethods: ["ABA Bank"] },
+        { id: "local", price: "1.340", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ACLEDA Bank"] },
+        { id: "fast", price: "1.003", merchantId: "okx-fast", nickName: "Fast_sonic", paymentMethods: ["Wing Money"] },
       ],
       sell: [],
     },
@@ -184,78 +150,82 @@ test("OKX USD Sell quote skips the two named merchants and starts with the next 
   try {
     const quote = await loadSideQuote("okx", "sell", "USD");
     assert.equal(quote.status, "live");
-    assert.deepEqual(quote.offers.slice(0, 3).map((item) => item.merchantName), [
-      "Fast_sonic",
-      "Komori",
-      "MENGYLFONG",
-    ]);
-    assert.equal(quote.offers.some((item) => item.id === "king" || item.id === "local"), false);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("an empty merchant blocklist allows the default OKX merchants again", async () => {
-  const originalFetch = globalThis.fetch;
-  const payload = {
-    code: "0",
-    data: {
-      buy: [
-        { id: "king", price: "1.350", merchantId: "okx-king", nickName: "KingXchanger001", paymentMethods: ["ABA Bank"] },
-        { id: "local", price: "1.350", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ABA Bank"] },
-      ],
-      sell: [],
-    },
-  };
-
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
-
-  try {
-    const quote = await loadSideQuote("okx", "sell", "USD", []);
-    assert.equal(quote.status, "live");
     assert.deepEqual(quote.offers.map((item) => item.merchantName), [
       "KingXchanger001",
       "Localcambodiapayeer",
+      "Fast_sonic",
     ]);
+    assert.deepEqual(quote.offers[1]?.paymentMethods, ["ACLEDA Bank"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("OKX USD Sell quote paginates until replacement ABA merchants are found", async () => {
+test("all exchange adapters request offers without payment-method restrictions", async () => {
   const originalFetch = globalThis.fetch;
-  const requestedPages: string[] = [];
-  const rowsByPage: Record<string, unknown[]> = {
-    "1": [
-      { id: "king", price: "1.350", merchantId: "okx-king", nickName: "KingXchanger001", paymentMethods: ["ABA Bank"] },
-      { id: "local", price: "1.350", merchantId: "okx-local", nickName: "Localcambodiapayeer", paymentMethods: ["ABA Bank"] },
-    ],
-    "2": [
-      { id: "fast", price: "1.003", merchantId: "okx-fast", nickName: "Fast_sonic", paymentMethods: ["ABA Bank"] },
-    ],
-    "3": [
-      { id: "komori", price: "1.002", merchantId: "okx-komori", nickName: "Komori", paymentMethods: ["ABA Bank"] },
-    ],
-  };
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const response = (payload: unknown) => new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 
-  globalThis.fetch = async (input) => {
-    const page = new URL(String(input)).searchParams.get("currentPage") ?? "1";
-    requestedPages.push(page);
-    return new Response(
-      JSON.stringify({ code: "0", data: { buy: rowsByPage[page] ?? [], sell: [] } }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const body = typeof init?.body === "string"
+      ? JSON.parse(init.body) as Record<string, unknown>
+      : undefined;
+    requests.push({ url, body });
+
+    if (url.includes("p2p.binance.com")) {
+      return response({
+        code: "000000",
+        data: [{ id: "binance-ad", price: "1.1", merchantName: "Binance trader", paymentMethods: ["ACLEDA Bank"] }],
+      });
+    }
+    if (url.includes("www.okx.com")) {
+      return response({
+        code: "0",
+        data: { sell: [{ id: "okx-ad", price: "1.1", nickName: "OKX trader", paymentMethods: ["ACLEDA Bank"] }], buy: [] },
+      });
+    }
+    if (url.includes("/fiat/otc/item/online")) {
+      return response({
+        ret_code: 0,
+        result: { items: [{ id: "bybit-ad", price: "1.1", payments: ["19"], userInfo: { userId: "bybit-user", nickName: "Bybit trader" } }] },
+      });
+    }
+    if (url.includes("/fiat/otc/configuration/queryAllPaymentList")) {
+      return response({ ret_code: 0, result: { paymentConfigVo: [{ paymentType: "19", paymentName: "ACLEDA Bank" }] } });
+    }
+    if (url.includes("www.bitget.com")) {
+      return response({
+        code: "00000",
+        data: { dataList: [{ adNo: "bitget-ad", price: "1.1", nickName: "Bitget trader", paymethodInfo: [{ paymethodName: "ACLEDA Bank" }] }] },
+      });
+    }
+    throw new Error(`Unexpected test URL: ${url}`);
   };
 
   try {
-    const quote = await loadSideQuote("okx", "sell", "USD");
-    assert.equal(quote.status, "live");
-    assert.deepEqual(requestedPages, ["1", "2", "3"]);
-    assert.deepEqual(quote.offers.slice(0, 2).map((item) => item.merchantName), [
-      "Fast_sonic",
-      "Komori",
-    ]);
+    for (const exchange of ["binance", "okx", "bybit", "bitget"] as const) {
+      const quote = await loadSideQuote(exchange, "buy", "USD");
+      assert.equal(quote.status, "live", `${exchange} should include an offer with a non-ABA method`);
+      assert.equal(quote.offers.length, 1);
+    }
+
+    const binanceBody = requests.find(({ url }) => url.includes("p2p.binance.com"))?.body;
+    assert.deepEqual(binanceBody?.payTypes, []);
+
+    const okxUrl = requests.find(({ url }) => url.includes("www.okx.com"))?.url;
+    assert.ok(okxUrl);
+    assert.equal(new URL(okxUrl).searchParams.get("paymentMethod"), "all");
+
+    const bybitBody = requests.find(({ url }) => url.includes("/fiat/otc/item/online"))?.body;
+    assert.deepEqual(bybitBody?.payment, []);
+
+    const bitgetBody = requests.find(({ url }) => url.includes("www.bitget.com"))?.body;
+    assert.ok(bitgetBody);
+    assert.deepEqual(Object.keys(bitgetBody).filter((key) => /^(pay|payment)/i.test(key)), []);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -301,7 +271,7 @@ test("OKX offer details normalize payment, price, and merchant", () => {
   assert.equal(result.maxFiat, 800000);
   assert.equal(result.tradeCount, 15);
   assert.equal(result.completionRate, 99);
-  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
+  assert.deepEqual(result.paymentMethods, ["ABA Bank"]);
 });
 
 test("Bitget ad shape normalizes ABA method and merchant details", () => {
@@ -331,7 +301,7 @@ test("Bitget ad shape normalizes ABA method and merchant details", () => {
   assert.equal(result.tradeCount, 42);
   assert.equal(result.completionRate, 98);
   assert.equal(result.verified, true);
-  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
+  assert.deepEqual(result.paymentMethods, ["ABA Bank"]);
 });
 
 test("Bybit result.items ads normalize with ABA payment names", () => {
@@ -369,5 +339,5 @@ test("Bybit result.items ads normalize with ABA payment names", () => {
   assert.equal(result.availableUsdt, 250);
   assert.equal(result.tradeCount, 120);
   assert.equal(result.completionRate, 98);
-  assert.equal(hasAbaBankPayment(result.paymentMethods), true);
+  assert.deepEqual(result.paymentMethods, ["ABA Bank"]);
 });
