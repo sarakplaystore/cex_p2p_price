@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FIAT, hasAbaBankPayment, isWithinMakerSellPriceRange, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, USD_MAKER_SELL_PRICE_RANGE, type P2POffer } from "../lib/p2p";
+import { DEFAULT_FIAT, hasAbaBankPayment, isWithinUsdPriceRange, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, USD_OFFER_PRICE_RANGE, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -34,15 +34,18 @@ test("ABA matching accepts ABA labels and rejects other banks", () => {
   assert.equal(hasAbaBankPayment(["ABACUS Exchange"]), false);
 });
 
-test("USD maker-sell ads must fall within the configured price range", () => {
-  const makerSell = (price: number) => offer({ fiat: "USD", side: "buy", price });
+test("USD buy and sell offers must fall within the configured price range", () => {
+  for (const side of ["buy", "sell"] as const) {
+    const usdOffer = (price: number) => offer({ fiat: "USD", side, price });
 
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_MAKER_SELL_PRICE_RANGE.min)), true);
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_MAKER_SELL_PRICE_RANGE.max)), true);
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_MAKER_SELL_PRICE_RANGE.min - 0.001)), false);
-  assert.equal(isWithinMakerSellPriceRange(makerSell(USD_MAKER_SELL_PRICE_RANGE.max + 0.001)), false);
-  assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "USD", side: "sell", price: 0.5 })), true);
-  assert.equal(isWithinMakerSellPriceRange(offer({ fiat: "KHR", side: "buy", price: 4_100 })), true);
+    assert.equal(isWithinUsdPriceRange(usdOffer(USD_OFFER_PRICE_RANGE.min)), true);
+    assert.equal(isWithinUsdPriceRange(usdOffer(USD_OFFER_PRICE_RANGE.max)), true);
+    assert.equal(isWithinUsdPriceRange(usdOffer(USD_OFFER_PRICE_RANGE.min - 0.001)), false);
+    assert.equal(isWithinUsdPriceRange(usdOffer(USD_OFFER_PRICE_RANGE.max + 0.001)), false);
+  }
+
+  assert.equal(isWithinUsdPriceRange(offer({ fiat: "KHR", side: "buy", price: 4_100 })), true);
+  assert.equal(isWithinUsdPriceRange(offer({ fiat: "KHR", side: "sell", price: 4_100 })), true);
 });
 
 test("buy ranking uses the lowest price and returns two unique merchants", () => {
