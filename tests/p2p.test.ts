@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_FIAT, hasAbaBankPayment, isWithinMakerSellPriceRange, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, USD_OFFER_PRICE_RANGE, type P2POffer } from "../lib/p2p";
-import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
+import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, loadSideQuote, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
   return {
@@ -109,6 +109,35 @@ test("OKX user buy/sell selects the matching advertiser-side list", () => {
 
   assert.equal(extractOkxRows(payload, "buy")[0]?.id, "advertiser-sells");
   assert.equal(extractOkxRows(payload, "sell")[0]?.id, "advertiser-buys");
+});
+
+test("OKX USD ABA maker-sell ads inside the inclusive range survive quote loading", async () => {
+  const originalFetch = globalThis.fetch;
+  const payload = {
+    code: "0",
+    data: {
+      sell: [
+        { id: "okx-min", price: "0.9", merchantId: "okx-min-merchant", nickName: "Min", paymentMethods: ["ABA Bank"] },
+        { id: "okx-max", price: "1.015", merchantId: "okx-max-merchant", nickName: "Max", paymentMethods: ["ABA Bank"] },
+        { id: "okx-outside", price: "1.016", merchantId: "okx-outside-merchant", nickName: "Outside", paymentMethods: ["ABA Bank"] },
+      ],
+      buy: [],
+    },
+  };
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  try {
+    const quote = await loadSideQuote("okx", "buy", "USD");
+    assert.equal(quote.status, "live");
+    assert.deepEqual(quote.offers.map((item) => item.id), ["okx-min", "okx-max"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Bybit and Bitget request the correct advertiser sides", () => {
