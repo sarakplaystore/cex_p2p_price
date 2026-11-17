@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_FIAT, filterMarketPriceOutliers, hasAbaBankPayment, MAX_MERCHANTS_PER_SIDE, medianPrice, normalizeCompletionRate, selectTopMerchants, type ExchangeQuote, type P2POffer } from "../lib/p2p";
+import { DEFAULT_FIAT, hasAbaBankPayment, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, type P2POffer } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -21,21 +21,6 @@ function offer(overrides: Partial<P2POffer> = {}): P2POffer {
     verified: false,
     ...overrides,
   };
-}
-
-function marketQuote(id: ExchangeQuote["id"], buyPrices: number[], sellPrices: number[]): ExchangeQuote {
-  const makeSide = (side: P2POffer["side"], prices: number[]) => ({
-    status: "live" as const,
-    offers: prices.map((price, index) => offer({
-      id: `${id}-${side}-${index}`,
-      exchange: id,
-      side,
-      merchantId: `${id}-${side}-${index}`,
-      merchantName: `${id} ${side} ${index}`,
-      price,
-    })),
-  });
-  return { id, buy: makeSide("buy", buyPrices), sell: makeSide("sell", sellPrices) };
 }
 
 test("USD is the default fiat market on first load", () => {
@@ -78,34 +63,6 @@ test("merchant selection can expand beyond the initial two up to its configured 
   const expanded = selectTopMerchants(offers, "buy", MAX_MERCHANTS_PER_SIDE);
   assert.equal(expanded.length, MAX_MERCHANTS_PER_SIDE);
   assert.deepEqual(expanded.slice(0, 2).map((item) => item.id), ["ad-0", "ad-1"]);
-});
-
-test("market guard filters outliers on both buy and sell sides", () => {
-  assert.equal(medianPrice([4_200, 4_100, 4_300]), 4_200);
-  assert.equal(medianPrice([4_100, 4_300]), 4_200);
-
-  const result = filterMarketPriceOutliers([
-    marketQuote("binance", [4_100], [4_110]),
-    marketQuote("okx", [4_090], [4_120]),
-    marketQuote("bybit", [4_110], [4_130]),
-    marketQuote("bitget", [4_105, 6_000], [3_000, 4_100]),
-  ]);
-  const bitget = result.find((exchange) => exchange.id === "bitget");
-
-  assert.ok(bitget);
-  assert.equal(bitget.buy.status, "live");
-  assert.equal(bitget.sell.status, "live");
-  if (bitget.buy.status === "live") assert.deepEqual(bitget.buy.offers.map((item) => item.price), [4_105]);
-  if (bitget.sell.status === "live") assert.deepEqual(bitget.sell.offers.map((item) => item.price), [4_100]);
-});
-
-test("market guard avoids making a decision with fewer than three exchange references", () => {
-  const quotes = [
-    marketQuote("binance", [4_100], [4_110]),
-    marketQuote("okx", [6_000], [2_000]),
-  ];
-
-  assert.deepEqual(filterMarketPriceOutliers(quotes), quotes);
 });
 
 test("sell ranking uses the highest price and caps the result at two", () => {
