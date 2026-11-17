@@ -3,6 +3,8 @@ import { loadSideQuote } from "@/lib/exchanges";
 import { DEFAULT_FIAT, EXCHANGES, type FiatCurrency, type QuotesPayload } from "@/lib/p2p";
 
 export const dynamic = "force-dynamic";
+// Allow for a sparse sell market requiring multiple time-limited page requests.
+export const maxDuration = 30;
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 

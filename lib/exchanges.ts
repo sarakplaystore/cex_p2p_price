@@ -1,5 +1,6 @@
 import {
   hasAbaBankPayment,
+  INITIAL_MERCHANT_LIMIT,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -11,7 +12,10 @@ import {
 } from "./p2p";
 
 type JsonRecord = Record<string, unknown>;
+type ReadPage = (page: number) => Promise<JsonRecord[]>;
 
+const PAGE_SIZE = 20;
+const MAX_SELL_PAGES = 5;
 const API_TIMEOUT_MS = 4_000;
 const LIST_KEYS = [
   "items",
@@ -132,8 +136,13 @@ function collectPaymentNames(value: unknown, output: Set<string>, depth = 0): vo
     }
   }
 
-  // Some responses wrap a method name one more level down; avoid collecting ids/numbers.
   if (!foundLabel) {
+    // A tradeMethods entry can carry the bank's textual identifier without a display name.
+    const identifier = value.identifier;
+    if (typeof identifier === "string" && /^aba(?: ?bank)?$/i.test(identifier.trim())) {
+      output.add(identifier.trim());
+    }
+    // Some responses wrap a method name one more level down; never infer a bank from a number.
     for (const [key, child] of Object.entries(value)) {
       if (PAYMENT_METHOD_KEYS.has(key.toLowerCase()) || /^(method|bank)$/i.test(key)) {
         collectPaymentNames(child, output, depth + 1);
@@ -178,7 +187,7 @@ export function normalizeOffer(
     firstString(traderRecords, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]) ??
     firstString(records, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]);
   const id =
-    firstString(records, ["advNo", "advertisementId", "id", "itemId", "offerId"]) ??
+    firstString(records, ["advNo", "adNo", "advertisementId", "id", "itemId", "offerId"]) ??
     `${exchange}-${side}-${merchantId ?? merchantName}-${price}`;
   const completionKeys = ["monthFinishRate", "completionRate", "recentExecuteRate", "finishRate", "successRate", "thirtyCompletionRate", "completedRate"];
   const completionRate = normalizeCompletionRate(
@@ -322,12 +331,13 @@ async function requestBinance(
   side: P2PSide,
   fiat: FiatCurrency,
   payTypes: string[],
+  page: number,
 ): Promise<JsonRecord[]> {
   const payload = await postJson(
     binanceUrl,
     {
-      page: 1,
-      rows: 20,
+      page,
+      rows: PAGE_SIZE,
       payTypes,
       asset: "USDT",
       tradeType: side === "buy" ? "BUY" : "SELL",
@@ -347,18 +357,15 @@ async function requestBinance(
   return result.rows;
 }
 
-async function binanceRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  const firstRows = await requestBinance(side, fiat, ["ABA Bank"]).catch(() => null);
-  if (firstRows && rowsContainAba(firstRows, "binance", side, fiat)) return firstRows;
-
-  // Binance's public API has used different values for its payment filter over
-  // time. Retry without that hint, then apply our own strict ABA-name filter.
-  try {
-    return await requestBinance(side, fiat, []);
-  } catch (fallbackError) {
-    if (firstRows) return firstRows;
-    throw fallbackError;
+async function binancePageReader(side: P2PSide, fiat: FiatCurrency): Promise<ReadPage> {
+  const hint = ["ABA Bank"];
+  const firstRows = await requestBinance(side, fiat, hint, 1).catch(() => null);
+  if (firstRows && rowsContainAba(firstRows, "binance", side, fiat)) {
+    return async (page) => page === 1 ? firstRows : requestBinance(side, fiat, hint, page);
   }
+  // An unsupported hint must not hide real ads. Restart at page one and keep
+  // the same unfiltered query for subsequent pages; verify methods locally.
+  return (page) => requestBinance(side, fiat, [], page);
 }
 
 export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
@@ -369,7 +376,7 @@ export function extractOkxRows(payload: unknown, side: P2PSide): JsonRecord[] {
   return rows.filter(isRecord);
 }
 
-async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+async function requestOkx(side: P2PSide, fiat: FiatCurrency, page: number): Promise<JsonRecord[]> {
   const apiSide = side === "buy" ? "sell" : "buy";
   const params = new URLSearchParams({
     side: apiSide,
@@ -384,8 +391,8 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord
     limit: "100",
     cryptoCurrency: "USDT",
     fiatCurrency: fiat,
-    currentPage: "1",
-    numberPerPage: "20",
+    currentPage: String(page),
+    numberPerPage: String(PAGE_SIZE),
     t: String(Date.now()),
   });
   const payload = await requestJson(
@@ -403,10 +410,6 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord
   assertSuccessfulResponse("okx", payload);
 
   return extractOkxRows(payload, side);
-}
-
-async function okxRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  return requestOkx(side, fiat);
 }
 
 const BYBIT_OFFER_URL = "https://api2.bybit.com/fiat/otc/item/online";
@@ -452,7 +455,8 @@ async function getBybitPaymentNameMap(): Promise<Map<string, string>> {
 }
 
 export function bybitAdvertiserSide(side: P2PSide): "0" | "1" {
-  return side === "buy" ? "0" : "1";
+  // Bybit filters by the ad maker: 0 buys USDT from the user, 1 sells it to the user.
+  return side === "sell" ? "0" : "1";
 }
 
 export function extractBybitRows(payload: unknown): JsonRecord[] {
@@ -462,17 +466,16 @@ export function extractBybitRows(payload: unknown): JsonRecord[] {
   return result.items.filter(isRecord);
 }
 
-async function requestBybit(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+async function requestBybit(side: P2PSide, fiat: FiatCurrency, page: number): Promise<JsonRecord[]> {
   const payload = await postJson(
     BYBIT_OFFER_URL,
     {
       userId: "",
       tokenId: "USDT",
       currencyId: fiat,
-      // Bybit's `side` describes the advertiser: 0 sells crypto, 1 buys it.
       side: bybitAdvertiserSide(side),
-      page: "1",
-      size: "20",
+      page: String(page),
+      size: String(PAGE_SIZE),
       payment: [],
       authMaker: false,
       canTrade: false,
@@ -501,12 +504,12 @@ export function addBybitPaymentNames(rows: JsonRecord[], paymentNames: Map<strin
   });
 }
 
-async function bybitRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  const [rows, paymentNames] = await Promise.all([
-    requestBybit(side, fiat),
-    getBybitPaymentNameMap().catch(() => new Map<string, string>()),
-  ]);
-  return addBybitPaymentNames(rows, paymentNames);
+function bybitPageReader(side: P2PSide, fiat: FiatCurrency): ReadPage {
+  const names = getBybitPaymentNameMap().catch(() => new Map<string, string>());
+  return async (page) => {
+    const [rows, paymentNames] = await Promise.all([requestBybit(side, fiat, page), names]);
+    return addBybitPaymentNames(rows, paymentNames);
+  };
 }
 
 export function bitgetMarketSide(side: P2PSide): 1 | 2 {
@@ -521,14 +524,14 @@ export function extractBitgetRows(payload: unknown): JsonRecord[] {
   return data.dataList.filter(isRecord);
 }
 
-async function bitgetRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
+async function bitgetRows(side: P2PSide, fiat: FiatCurrency, page: number): Promise<JsonRecord[]> {
   const payload = await postJson(
     "https://www.bitget.com/v1/p2p/pub/adv/queryAdvList",
     {
       // Bitget side: 1 = user buys crypto; 2 = user sells crypto.
       side: bitgetMarketSide(side),
-      pageNo: 1,
-      pageSize: 20,
+      pageNo: page,
+      pageSize: PAGE_SIZE,
       coinCode: "USDT",
       fiatCode: fiat,
       orderBy: 1,
@@ -556,11 +559,11 @@ async function bitgetRows(side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord
   return extractBitgetRows(payload);
 }
 
-async function fetchRows(exchange: ExchangeId, side: P2PSide, fiat: FiatCurrency): Promise<JsonRecord[]> {
-  if (exchange === "binance") return binanceRows(side, fiat);
-  if (exchange === "okx") return okxRows(side, fiat);
-  if (exchange === "bybit") return bybitRows(side, fiat);
-  return bitgetRows(side, fiat);
+async function getPageReader(exchange: ExchangeId, side: P2PSide, fiat: FiatCurrency): Promise<ReadPage> {
+  if (exchange === "binance") return binancePageReader(side, fiat);
+  if (exchange === "okx") return (page) => requestOkx(side, fiat, page);
+  if (exchange === "bybit") return bybitPageReader(side, fiat);
+  return (page) => bitgetRows(side, fiat, page);
 }
 
 export async function loadSideQuote(
@@ -568,23 +571,32 @@ export async function loadSideQuote(
   side: P2PSide,
   fiat: FiatCurrency,
 ): Promise<SideQuote> {
+  let topOffers: P2POffer[] = [];
   try {
-    const rows = await fetchRows(exchange, side, fiat);
-    const offers = rows
-      .map((row) => normalizeOffer(row, exchange, side, fiat))
-      .filter((offer): offer is P2POffer => offer !== null);
-    const topOffers = selectTopMerchants(offers, side, MAX_MERCHANTS_PER_SIDE);
+    const readPage = await getPageReader(exchange, side, fiat);
+    const maxPages = side === "sell" ? MAX_SELL_PAGES : 1;
+    const seenAdIds = new Set<string>();
+    for (let page = 1; page <= maxPages; page++) {
+      const rows = await readPage(page);
+      if (!rows.length) break;
+      const offers = rows
+        .map((row) => normalizeOffer(row, exchange, side, fiat))
+        .filter((offer): offer is P2POffer => offer !== null);
+      topOffers = selectTopMerchants([...topOffers, ...offers], side, MAX_MERCHANTS_PER_SIDE);
+      if (topOffers.length >= INITIAL_MERCHANT_LIMIT) break;
 
-    return topOffers.length
-      ? { status: "live", offers: topOffers }
-      : { status: "empty", offers: [], message: "No verifiable ABA Bank ads found." };
+      // Some marketplaces repeat their last page instead of returning an empty list.
+      if (offers.length && offers.every(({ id }) => seenAdIds.has(id))) break;
+      for (const { id } of offers) seenAdIds.add(id);
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown exchange error";
     console.warn(`[P2P Radar] ${exchange} ${side} feed failed: ${reason}`);
-    return {
-      status: "error",
-      offers: [],
-      message: "The exchange P2P feed is temporarily unavailable.",
-    };
+    if (!topOffers.length) {
+      return { status: "error", offers: [], message: "The exchange P2P feed is temporarily unavailable." };
+    }
   }
+  return topOffers.length
+    ? { status: "live", offers: topOffers }
+    : { status: "empty", offers: [], message: "No verifiable ABA Bank ads found." };
 }
