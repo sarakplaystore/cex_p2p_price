@@ -164,6 +164,25 @@ function paymentNamesFor(row: JsonRecord, ad: JsonRecord): string[] {
   return [...output];
 }
 
+const MERCHANT_ID_KEYS = ["userMaskId", "userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"];
+
+/**
+ * Anonymous marketplace responses can anonymize every advertiser to id "0"
+ * (Bybit does this for userId/accountId); treating that as a real merchant id
+ * would collapse all ads into a single merchant. Skip placeholders and let
+ * the caller fall back to the merchant name instead.
+ */
+function firstMerchantId(records: JsonRecord[]): string | null {
+  for (const record of records) {
+    for (const key of MERCHANT_ID_KEYS) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim() && value.trim() !== "0") return value.trim();
+      if (typeof value === "number" && Number.isFinite(value) && value !== 0) return String(value);
+    }
+  }
+  return null;
+}
+
 export function normalizeOffer(
   row: JsonRecord,
   exchange: ExchangeId,
@@ -183,9 +202,7 @@ export function normalizeOffer(
     ) ??
     firstString(records, ["nickName", "nickname", "merchantName", "userName", "username"]) ??
     "P2P merchant";
-  const merchantId =
-    firstString(traderRecords, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]) ??
-    firstString(records, ["userNo", "userId", "accountId", "uid", "traderId", "advertiserId", "encryptUserId", "merchantId", "publicUserId"]);
+  const merchantId = firstMerchantId(traderRecords) ?? firstMerchantId(records);
   const id =
     firstString(records, ["advNo", "adNo", "advertisementId", "id", "itemId", "offerId"]) ??
     `${exchange}-${side}-${merchantId ?? merchantName}-${price}`;
@@ -300,9 +317,9 @@ function assertSuccessfulResponse(exchange: ExchangeId, payload: unknown): void 
   }
 }
 
-async function requestJson(url: string, init: RequestInit): Promise<unknown> {
+async function requestJson(url: string, init: RequestInit, timeoutMs = API_TIMEOUT_MS): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, { ...init, cache: "no-store", signal: controller.signal });
@@ -313,7 +330,7 @@ async function requestJson(url: string, init: RequestInit): Promise<unknown> {
   }
 }
 
-async function postJson(url: string, body: unknown, headers: Record<string, string>): Promise<unknown> {
+async function postJson(url: string, body: unknown, headers: Record<string, string>, timeoutMs?: number): Promise<unknown> {
   return requestJson(url, {
     method: "POST",
     headers: {
@@ -322,7 +339,7 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
       ...headers,
     },
     body: JSON.stringify(body),
-  });
+  }, timeoutMs);
 }
 
 const binanceUrl = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
@@ -414,8 +431,43 @@ async function requestOkx(side: P2PSide, fiat: FiatCurrency, page: number): Prom
 
 const BYBIT_OFFER_URL = "https://api2.bybit.com/fiat/otc/item/online";
 const BYBIT_PAYMENT_LIST_URL = "https://api2.bybit.com/fiat/otc/configuration/queryAllPaymentList";
+// Bybit ads carry numeric payment ids only, and the payment-config endpoint
+// that translates them is bot-protected (and very slow) from server/datacenter
+// IPs, so it cannot be the only source of names: when it fails, every id stays
+// unresolved and the ABA filter would discard every Bybit ad. These names for
+// the Cambodian methods this dashboard can surface come from Bybit's own
+// payment configuration and act as the fallback; a live config response, when
+// one is reachable, overrides them.
+const BYBIT_KNOWN_PAYMENT_NAMES = new Map<string, string>([
+  ["194", "ABA"],
+  ["578", "ACLEDA"],
+  ["564", "KHQR"],
+  ["565", "True Money (Cambodia)"],
+  ["229", "WingMoney"],
+  ["204", "Bank transfer (Cambodia)"],
+  ["217", "Bakong"],
+]);
+// The config payload is ~750 KB and can take well over the ad-request timeout.
+const BYBIT_PAYMENT_LIST_TIMEOUT_MS = 12_000;
+// Never let a slow/blocked config lookup hold up the ads themselves.
+const BYBIT_PAYMENT_NAMES_WAIT_MS = 3_000;
 let bybitPaymentNameCache: { names: Map<string, string>; expiresAt: number } | null = null;
 let bybitPaymentNameRequest: Promise<Map<string, string>> | null = null;
+
+/**
+ * Payment ids to ask Bybit to filter on server-side. Prefer ids whose live
+ * config name identifies ABA Bank; fall back to the known id above when the
+ * config endpoint is unreachable, which is the usual case from a server.
+ */
+export function bybitAbaPaymentIds(paymentNames: Map<string, string>): string[] {
+  const liveIds = [...paymentNames]
+    .filter(([, name]) => hasAbaBankPayment([name]))
+    .map(([id]) => id);
+  if (liveIds.length) return liveIds;
+  return [...BYBIT_KNOWN_PAYMENT_NAMES]
+    .filter(([, name]) => hasAbaBankPayment([name]))
+    .map(([id]) => id);
+}
 
 async function getBybitPaymentNameMap(): Promise<Map<string, string>> {
   if (bybitPaymentNameCache && bybitPaymentNameCache.expiresAt > Date.now()) {
@@ -432,6 +484,7 @@ async function getBybitPaymentNameMap(): Promise<Map<string, string>> {
         Referer: "https://www.bybit.com/",
         "User-Agent": "Mozilla/5.0",
       },
+      BYBIT_PAYMENT_LIST_TIMEOUT_MS,
     );
     assertSuccessfulResponse("bybit", payload);
     const result = isRecord(payload) && isRecord(payload.result) ? payload.result : {};
@@ -466,7 +519,12 @@ export function extractBybitRows(payload: unknown): JsonRecord[] {
   return result.items.filter(isRecord);
 }
 
-async function requestBybit(side: P2PSide, fiat: FiatCurrency, page: number): Promise<JsonRecord[]> {
+async function requestBybit(
+  side: P2PSide,
+  fiat: FiatCurrency,
+  page: number,
+  payment: string[] = [],
+): Promise<JsonRecord[]> {
   const payload = await postJson(
     BYBIT_OFFER_URL,
     {
@@ -476,7 +534,8 @@ async function requestBybit(side: P2PSide, fiat: FiatCurrency, page: number): Pr
       side: bybitAdvertiserSide(side),
       page: String(page),
       size: String(PAGE_SIZE),
-      payment: [],
+      payment,
+      amount: "",
       authMaker: false,
       canTrade: false,
     },
@@ -504,12 +563,48 @@ export function addBybitPaymentNames(rows: JsonRecord[], paymentNames: Map<strin
   });
 }
 
-function bybitPageReader(side: P2PSide, fiat: FiatCurrency): ReadPage {
-  const names = getBybitPaymentNameMap().catch(() => new Map<string, string>());
-  return async (page) => {
-    const [rows, paymentNames] = await Promise.all([requestBybit(side, fiat, page), names]);
-    return addBybitPaymentNames(rows, paymentNames);
-  };
+async function waitForBybitPaymentNames(
+  request: Promise<Map<string, string>>,
+): Promise<Map<string, string> | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), BYBIT_PAYMENT_NAMES_WAIT_MS);
+    timer.unref?.();
+  });
+  try {
+    // A null result only means "not yet"; the request keeps running and still
+    // populates the cache for the next refresh.
+    return await Promise.race([request, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function bybitPageReader(side: P2PSide, fiat: FiatCurrency): Promise<ReadPage> {
+  const fetchedNames = await waitForBybitPaymentNames(
+    getBybitPaymentNameMap().catch(() => new Map<string, string>()),
+  );
+  const paymentNames = new Map([...BYBIT_KNOWN_PAYMENT_NAMES, ...(fetchedNames ?? [])]);
+  const withNames = (rows: JsonRecord[]) => addBybitPaymentNames(rows, paymentNames);
+
+  // Ask Bybit to filter by the ABA payment id: ads come back pre-filtered, so
+  // they no longer depend on resolving every ad's ids through the
+  // bot-protected config endpoint, and the ABA ads are on the first page
+  // instead of being scattered through the unfiltered global book.
+  const abaPaymentIds = bybitAbaPaymentIds(fetchedNames ?? new Map<string, string>());
+  if (abaPaymentIds.length) {
+    try {
+      const firstRows = await requestBybit(side, fiat, 1, abaPaymentIds);
+      if (firstRows.length && rowsContainAba(withNames(firstRows), "bybit", side, fiat)) {
+        return async (page) =>
+          page === 1 ? withNames(firstRows) : withNames(await requestBybit(side, fiat, page, abaPaymentIds));
+      }
+    } catch {
+      // An unsupported filter must not hide real ads; use the unfiltered book.
+    }
+  }
+  // Restart at page one and verify payment methods locally, as before.
+  return async (page) => withNames(await requestBybit(side, fiat, page));
 }
 
 export function bitgetMarketSide(side: P2PSide): 1 | 2 {
