@@ -42,6 +42,82 @@ export interface ExchangeQuote {
   id: ExchangeId;
   buy: SideQuote;
   sell: SideQuote;
+  /** Same-exchange buy/sell spread summary at the best prices, when both sides are live. */
+  arbitrage?: {
+    spread: number;
+    spreadPercent: number;
+    opportunity: boolean;
+  } | null;
+}
+
+export interface ArbitrageOpportunity {
+  exchange: ExchangeId;
+  fiat: FiatCurrency;
+  buyMerchant: string;
+  buyPrice: number;
+  sellMerchant: string;
+  sellPrice: number;
+  /** sellPrice - buyPrice, in fiat per USDT. */
+  spread: number;
+  /** Spread as a percentage of the buy price, e.g. 0.1 for $1.000 -> $1.001. */
+  spreadPercent: number;
+}
+
+/**
+ * Per-exchange arbitrage: the best ad to sell USDT into pays more than the
+ * best ad to buy USDT from, on the same exchange and fiat market. Only live
+ * ABA-verified offers returned to the dashboard are considered.
+ */
+export function findArbitrageOpportunities(
+  exchanges: readonly ExchangeQuote[],
+  fiat: FiatCurrency,
+  minSpreadPercent: number,
+): ArbitrageOpportunity[] {
+  const opportunities: ArbitrageOpportunity[] = [];
+
+  for (const { id, buy, sell } of exchanges) {
+    if (buy.status !== "live" || sell.status !== "live") continue;
+    const bestBuy = buy.offers.reduce<P2POffer | null>(
+      (best, offer) => (best === null || offer.price < best.price ? offer : best),
+      null,
+    );
+    const bestSell = sell.offers.reduce<P2POffer | null>(
+      (best, offer) => (best === null || offer.price > best.price ? offer : best),
+      null,
+    );
+    if (!bestBuy || !bestSell || bestBuy.price <= 0) continue;
+
+    const spread = bestSell.price - bestBuy.price;
+    const spreadPercent = (spread / bestBuy.price) * 100;
+    // Compare with a small epsilon so an exact-threshold spread (e.g. the
+    // $1.000 -> $1.001 example) is not lost to floating-point rounding.
+    if (spreadPercent + 1e-9 < minSpreadPercent) continue;
+
+    opportunities.push({
+      exchange: id,
+      fiat,
+      buyMerchant: bestBuy.merchantName,
+      buyPrice: bestBuy.price,
+      sellMerchant: bestSell.merchantName,
+      sellPrice: bestSell.price,
+      spread,
+      spreadPercent,
+    });
+  }
+
+  return opportunities.sort((left, right) => right.spreadPercent - left.spreadPercent);
+}
+
+/** Best-price buy/sell spread for one exchange, or null when either side is not live. */
+export function exchangeSpread(
+  quote: ExchangeQuote,
+): { spread: number; spreadPercent: number } | null {
+  if (quote.buy.status !== "live" || quote.sell.status !== "live") return null;
+  const buyPrice = Math.min(...quote.buy.offers.map((offer) => offer.price));
+  const sellPrice = Math.max(...quote.sell.offers.map((offer) => offer.price));
+  if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice) || buyPrice <= 0) return null;
+  const spread = sellPrice - buyPrice;
+  return { spread, spreadPercent: (spread / buyPrice) * 100 };
 }
 
 export interface QuotesPayload {

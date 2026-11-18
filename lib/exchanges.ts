@@ -375,7 +375,11 @@ async function requestBinance(
 }
 
 async function binancePageReader(side: P2PSide, fiat: FiatCurrency): Promise<ReadPage> {
-  const hint = ["ABA Bank"];
+  // Binance payTypes takes the payment method *identifier*, not its display
+  // name: "ABA" matches (175+ USD sell ads), while "ABA Bank" silently
+  // returns zero ads. Without a working hint the first ABA sell ad can sit
+  // past page 10 of the global USD book, far beyond the unfiltered scan.
+  const hint = ["ABA"];
   const firstRows = await requestBinance(side, fiat, hint, 1).catch(() => null);
   if (firstRows && rowsContainAba(firstRows, "binance", side, fiat)) {
     return async (page) => page === 1 ? firstRows : requestBinance(side, fiat, hint, page);

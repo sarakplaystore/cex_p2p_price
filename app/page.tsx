@@ -209,6 +209,11 @@ function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EX
             <p>USDT / {fiat}</p>
           </div>
         </div>
+        {quote?.arbitrage?.opportunity ? (
+          <span className="arb-pill" title="Best sell price beats best buy price on this exchange — arbitrage alert threshold reached">
+            ARB +{quote.arbitrage.spreadPercent.toFixed(2)}%
+          </span>
+        ) : null}
         <span className={`exchange-state ${isLive ? "state-live" : isError ? "state-error" : ""}`}>
           <span className="state-dot" />{stateLabel}
         </span>
