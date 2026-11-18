@@ -331,6 +331,11 @@ function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EX
   const isError = quote?.buy.status === "error" || quote?.sell.status === "error";
   const allError = quote?.buy.status === "error" && quote?.sell.status === "error";
   const stateLabel = loading && !quote ? "CONNECTING" : isLive ? "LIVE" : allError ? "OFFLINE" : isError ? "PARTIAL" : quote ? "NO MATCH" : "READY";
+  // Spread and $ per $1,000 at this exchange's best prices — shown on every
+  // card with both sides live, in gold only when the alert threshold is hit.
+  const arb = quote?.arbitrage && quote.buy.status === "live" && quote.sell.status === "live"
+    ? quote.arbitrage
+    : null;
 
   return (
     <article className="exchange-card">
@@ -344,9 +349,14 @@ function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EX
             <p>USDT / {fiat}</p>
           </div>
         </div>
-        {quote?.arbitrage?.opportunity ? (
-          <span className="arb-pill" title={`Best sell price beats best buy price on this exchange — arbitrage alert threshold reached (≈ ${formatPerThousand(quote.arbitrage.profitPerThousand, fiat)} profit per ${thousandTradedLabel(fiat)}, before fees)`}>
-            ARB +{quote.arbitrage.spreadPercent.toFixed(2)}% · {formatPerThousand(quote.arbitrage.profitPerThousand, fiat)}/1K
+        {arb ? (
+          <span
+            className={`arb-pill${arb.opportunity ? "" : " arb-pill-muted"}`}
+            title={arb.opportunity
+              ? `Best sell price beats best buy price on this exchange — arbitrage alert threshold reached (≈ ${formatPerThousand(arb.profitPerThousand, fiat)} profit per ${thousandTradedLabel(fiat)}, before fees)`
+              : `Best sell vs best buy spread on this exchange (≈ ${formatPerThousand(arb.profitPerThousand, fiat)} per ${thousandTradedLabel(fiat)}, before fees)`}
+          >
+            {arb.opportunity ? "ARB " : ""}{arb.spreadPercent >= 0 ? "+" : ""}{arb.spreadPercent.toFixed(2)}% · {formatPerThousand(arb.profitPerThousand, fiat)}/1K
           </span>
         ) : null}
         <span className={`exchange-state ${isLive ? "state-live" : isError ? "state-error" : ""}`}>
