@@ -18,7 +18,7 @@ npm run build
 
 ## Arbitrage Telegram alerts
 
-When the best **sell** price on an exchange beats the best **buy** price on the *same* exchange by at least **0.1%** (for example OKX buy $1.000 → sell $1.001), the dashboard sends a Telegram alert naming the exchange, both merchants, and the spread. The exchange card also shows an `ARB` badge. Alerts are checked on every dashboard refresh (every 30 seconds) and via the standalone check endpoint below. A continuing opportunity re-alerts at most once per cooldown (default 15 minutes); if it closes and reappears, it alerts again immediately.
+When the best **sell** price on an exchange beats the best **buy** price on the *same* exchange by at least **0.1%** (for example OKX buy $1.000 → sell $1.001), the dashboard sends a Telegram alert naming the exchange, both merchants, and the spread. The exchange card also shows an `ARB` badge. The badge, the dashboard's buy/sell spread summary, and the Telegram alert all include the estimated profit **per $1,000 traded** at the best prices (buy $1.000 → sell $1.001 = **+$1.00 per $1,000**, before fees; the KHR market shows KHR per 1,000 KHR). Alerts are checked on every dashboard refresh (every 30 seconds) and via the standalone check endpoint below. A continuing opportunity re-alerts at most once per cooldown (default 15 minutes); if it closes and reappears, it alerts again immediately.
 
 Setup (no alert is sent until these are set):
 

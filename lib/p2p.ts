@@ -46,6 +46,8 @@ export interface ExchangeQuote {
   arbitrage?: {
     spread: number;
     spreadPercent: number;
+    /** Fiat profit per 1,000 fiat traded at the best prices, e.g. 1 for $1.000 -> $1.001. */
+    profitPerThousand: number;
     opportunity: boolean;
   } | null;
 }
@@ -61,6 +63,17 @@ export interface ArbitrageOpportunity {
   spread: number;
   /** Spread as a percentage of the buy price, e.g. 0.1 for $1.000 -> $1.001. */
   spreadPercent: number;
+  /** Fiat profit per 1,000 fiat traded at these prices, e.g. 1 for $1.000 -> $1.001. */
+  profitPerThousand: number;
+}
+
+/**
+ * Fiat profit from spending 1,000 fiat to buy USDT at `buyPrice` and immediately
+ * reselling it all at `sellPrice` (before exchange fees), e.g. buying at $1.000
+ * and selling at $1.001 earns $1.00 per $1,000 traded.
+ */
+export function arbitrageProfitPerThousand(buyPrice: number, sellPrice: number): number {
+  return ((sellPrice - buyPrice) / buyPrice) * 1000;
 }
 
 /**
@@ -102,6 +115,7 @@ export function findArbitrageOpportunities(
       sellPrice: bestSell.price,
       spread,
       spreadPercent,
+      profitPerThousand: arbitrageProfitPerThousand(bestBuy.price, bestSell.price),
     });
   }
 
@@ -111,13 +125,17 @@ export function findArbitrageOpportunities(
 /** Best-price buy/sell spread for one exchange, or null when either side is not live. */
 export function exchangeSpread(
   quote: ExchangeQuote,
-): { spread: number; spreadPercent: number } | null {
+): { spread: number; spreadPercent: number; profitPerThousand: number } | null {
   if (quote.buy.status !== "live" || quote.sell.status !== "live") return null;
   const buyPrice = Math.min(...quote.buy.offers.map((offer) => offer.price));
   const sellPrice = Math.max(...quote.sell.offers.map((offer) => offer.price));
   if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice) || buyPrice <= 0) return null;
   const spread = sellPrice - buyPrice;
-  return { spread, spreadPercent: (spread / buyPrice) * 100 };
+  return {
+    spread,
+    spreadPercent: (spread / buyPrice) * 100,
+    profitPerThousand: arbitrageProfitPerThousand(buyPrice, sellPrice),
+  };
 }
 
 export interface QuotesPayload {

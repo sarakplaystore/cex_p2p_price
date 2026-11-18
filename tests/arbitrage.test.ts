@@ -8,7 +8,13 @@ import {
   resetArbitrageAlertState,
   type ArbitrageAlertConfig,
 } from "../lib/alerts";
-import { findArbitrageOpportunities, type ExchangeQuote, type P2POffer } from "../lib/p2p";
+import {
+  arbitrageProfitPerThousand,
+  exchangeSpread,
+  findArbitrageOpportunities,
+  type ExchangeQuote,
+  type P2POffer,
+} from "../lib/p2p";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
   return {
@@ -49,6 +55,23 @@ test("arbitrage: the $1.000 buy / $1.001 sell example meets the 0.1% threshold",
   assert.equal(opportunities[0]?.buyMerchant, "Buyer");
   assert.equal(opportunities[0]?.sellMerchant, "Seller");
   assert.ok(Math.abs((opportunities[0]?.spreadPercent ?? 0) - 0.1) < 1e-9);
+  // $1.000 -> $1.001 earns exactly $1.00 per $1,000 traded.
+  assert.ok(Math.abs((opportunities[0]?.profitPerThousand ?? 0) - 1) < 1e-9);
+});
+
+test("arbitrage: profit per $1,000 scales with the spread and buy price", () => {
+  // Buy $1.002, sell $1.005: $0.003 spread on a $1.002 base.
+  assert.ok(Math.abs(arbitrageProfitPerThousand(1.002, 1.005) - 2.9940119760479043) < 1e-9);
+  const summary = exchangeSpread(quote(1.002, 1.005));
+  assert.ok(summary);
+  assert.ok(Math.abs(summary.spreadPercent - 0.2994011976047904) < 1e-9);
+  assert.ok(Math.abs(summary.profitPerThousand - 2.9940119760479043) < 1e-9);
+
+  // A crossed market (sell below buy) is a per-$1,000 loss, and KHR prices
+  // report the profit in KHR per 1,000 KHR traded.
+  assert.ok(Math.abs(arbitrageProfitPerThousand(1.005, 1.002) + 2.9850746268656714) < 1e-9);
+  assert.equal(arbitrageProfitPerThousand(4000, 4020), 5);
+  assert.equal(exchangeSpread(quote(1, null)), null);
 });
 
 test("arbitrage: below-threshold and one-sided markets do not alert", () => {
@@ -223,4 +246,5 @@ test("alert message names the exchange, both merchants, and the spread", () => {
   assert.match(message, /Buy: {2}1\.0000 USD\/USDT from Buyer/);
   assert.match(message, /Sell: 1\.0010 USD\/USDT to Seller/);
   assert.match(message, /Spread: \+0\.0010 USD \(\+0\.100%\)/);
+  assert.match(message, /Profit: ≈ \$1\.00 per \$1,000 traded/);
 });
