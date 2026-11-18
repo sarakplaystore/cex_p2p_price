@@ -59,7 +59,10 @@ for (const { id: exchange } of EXCHANGES) {
     const quote = await loadSideQuote(exchange, "sell", "USD");
     assert.equal(quote.status, "live");
     assert.deepEqual(quote.offers.map(({ id }) => id), ["first", "next"]);
-    assert.deepEqual(pages, [1, 2, 3]);
+    // Bybit first probes with its server-side ABA payment filter; this mock
+    // does not honour the filter (page 1 has no ABA ad), so it restarts on the
+    // unfiltered book and pages from page 1 again.
+    assert.deepEqual(pages, exchange === "bybit" ? [1, 1, 2, 3] : [1, 2, 3]);
   });
 }
 
