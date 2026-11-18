@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GET } from "../app/api/quotes/route";
-import { DEFAULT_FIAT, EXCHANGES, hasAbaBankPayment, MAX_MERCHANTS_PER_SIDE, normalizeCompletionRate, selectTopMerchants, type P2POffer, type QuotesPayload } from "../lib/p2p";
+import { GET, POST } from "../app/api/quotes/route";
+import { DEFAULT_BLOCKED_MERCHANTS, DEFAULT_FIAT, EXCHANGES, hasAbaBankPayment, isMerchantBlocked, MAX_BLOCKED_MERCHANTS, MAX_MERCHANTS_PER_SIDE, normalizeBlockedMerchantNames, normalizeCompletionRate, selectTopMerchants, type P2POffer, type QuotesPayload } from "../lib/p2p";
 import { addBybitPaymentNames, bitgetMarketSide, bybitAdvertiserSide, extractBitgetRows, extractBybitRows, extractOkxRows, loadSideQuote, normalizeOffer } from "../lib/exchanges";
 
 function offer(overrides: Partial<P2POffer> = {}): P2POffer {
@@ -135,7 +135,26 @@ test("OKX USD buy quote includes ABA ads outside the former price range", async 
   }
 });
 
-test("OKX USD Sell quote keeps merchants that were previously blocklisted", async () => {
+test("merchant blocklist matches names globally and normalizes user input", () => {
+  assert.deepEqual(DEFAULT_BLOCKED_MERCHANTS, ["KingXchanger001", "Localcambodiapayeer"]);
+  const normalized = normalizeBlockedMerchantNames([
+    " KingXchanger001 ",
+    "kingxchanger001",
+    "Localcambodiapayeer",
+    "",
+    "x".repeat(81),
+    123,
+  ]);
+  assert.deepEqual(normalized, ["KingXchanger001", "Localcambodiapayeer"]);
+
+  assert.equal(isMerchantBlocked(offer({ merchantName: " kingxchanger001 " }), normalized), true);
+  assert.equal(isMerchantBlocked(offer({ exchange: "okx", side: "sell", fiat: "USD", merchantName: "LOCALCAMBODIAPAYEER" }), normalized), true);
+  assert.equal(isMerchantBlocked(offer({ exchange: "bitget", side: "sell", fiat: "USD", merchantName: "Fast_sonic" }), normalized), false);
+  assert.deepEqual(normalizeBlockedMerchantNames(null), []);
+  assert.equal(normalizeBlockedMerchantNames(Array.from({ length: MAX_BLOCKED_MERCHANTS + 5 }, (_, index) => `M${index}`)).length, MAX_BLOCKED_MERCHANTS);
+});
+
+test("OKX USD Sell quote hides the default blocked merchants unless the blocklist is empty", async () => {
   const originalFetch = globalThis.fetch;
   const payload = {
     code: "0",
@@ -156,9 +175,15 @@ test("OKX USD Sell quote keeps merchants that were previously blocklisted", asyn
     });
 
   try {
-    const quote = await loadSideQuote("okx", "sell", "USD");
-    assert.equal(quote.status, "live");
-    assert.deepEqual(quote.offers.map((item) => item.merchantName), [
+    // Default blocklist: both named merchants are hidden, leaving no ABA ads.
+    const blocked = await loadSideQuote("okx", "sell", "USD");
+    assert.equal(blocked.status, "empty");
+    assert.deepEqual(blocked.offers, []);
+
+    // An explicitly empty blocklist (block mode off) allows them again.
+    const allowed = await loadSideQuote("okx", "sell", "USD", []);
+    assert.equal(allowed.status, "live");
+    assert.deepEqual(allowed.offers.map((item) => item.merchantName), [
       "KingXchanger001",
       "Localcambodiapayeer",
     ]);
@@ -216,6 +241,60 @@ test("quotes API returns only ABA ads for every exchange, side, and fiat", async
       }
     }
   }
+});
+
+test("quotes API applies the posted merchant blocklist", async (t) => {
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const ad = { id: "aba", price: "1.1", nickName: "Multi-bank trader" };
+    if (url.hostname === "p2p.binance.com") {
+      return Response.json({ code: "000000", data: [{ adv: { ...ad, tradeMethods: [{ tradeMethodName: "ABA Bank" }] } }] });
+    }
+    if (url.hostname === "www.okx.com") {
+      return Response.json({ code: "0", data: { buy: [{ ...ad, paymentMethods: ["ABA Bank"] }], sell: [{ ...ad, paymentMethods: ["ABA Bank"] }] } });
+    }
+    if (url.pathname.endsWith("/queryAllPaymentList")) {
+      return Response.json({ ret_code: 0, result: { paymentConfigVo: [{ paymentType: "42", paymentName: "ABA Bank" }] } });
+    }
+    if (url.pathname.endsWith("/item/online")) {
+      return Response.json({ ret_code: 0, result: { items: [{ ...ad, payments: ["42"] }] } });
+    }
+    if (url.hostname === "www.bitget.com") {
+      return Response.json({ code: "00000", data: { dataList: [{ ...ad, paymethodInfo: [{ paymethodName: "ABA Bank" }] }] } });
+    }
+    throw new Error(`Unexpected test URL: ${url}`);
+  });
+
+  const unblocked = await POST(new Request("https://example.test/api/quotes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fiat: "USD", blockedMerchants: [] }),
+  }));
+  assert.equal(unblocked.status, 200);
+  const unblockedPayload: QuotesPayload = await unblocked.json();
+  for (const exchange of unblockedPayload.exchanges) {
+    assert.equal(exchange.buy.status, "live", exchange.id);
+  }
+
+  const blocked = await POST(new Request("https://example.test/api/quotes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fiat: "USD", blockedMerchants: ["multi-bank TRADER"] }),
+  }));
+  assert.equal(blocked.status, 200);
+  const blockedPayload: QuotesPayload = await blocked.json();
+  for (const exchange of blockedPayload.exchanges) {
+    assert.equal(exchange.buy.status, "empty", exchange.id);
+    assert.equal(exchange.sell.status, "empty", exchange.id);
+    assert.deepEqual(exchange.buy.offers, []);
+  }
+
+  const malformed = await POST(new Request("https://example.test/api/quotes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fiat: "USD", blockedMerchants: "Multi-bank trader" }),
+  }));
+  assert.equal(malformed.status, 400);
 });
 
 test("Binance stops its unfiltered sell lookup on a repeated non-ABA page", async (t) => {

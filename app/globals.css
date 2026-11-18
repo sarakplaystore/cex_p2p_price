@@ -112,6 +112,30 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .refresh-clock { display: grid; place-items: center; color: #73858a; width: 31px; height: 31px; background: #f4f7f7; border-radius: 8px; }
 .refresh-clock .refresh-icon { width: 15px; height: 15px; }
 
+.merchant-blocklist-panel { display: grid; gap: 12px; margin-top: 12px; padding: 16px 19px; border: 1px solid #e6ecec; border-radius: 13px; background: rgba(255,255,255,.96); box-shadow: 0 6px 18px rgba(16, 45, 54, .035); }
+.merchant-blocklist-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.merchant-blocklist-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: #172a33; font-family: var(--display-font); font-size: 16px; letter-spacing: -.03em; }
+.merchant-blocklist-header p { margin: 5px 0 0; color: #839198; font-size: 10px; }
+.blocklist-count { display: inline-grid; place-items: center; min-width: 29px; height: 19px; padding: 0 5px; border-radius: 6px; background: #f0f5f4; color: #71808a; font-family: var(--body-font); font-size: 9px; letter-spacing: 0; }
+.blocklist-mode-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid #e2e9e8; border-radius: 999px; background: #f6f8f8; color: #75858b; font-size: 10px; font-weight: 700; white-space: nowrap; transition: .16s; }
+.blocklist-mode-toggle:hover { border-color: #b9d9d0; }
+.blocklist-mode-toggle.is-active { border-color: #bde6d7; background: #effaf5; color: #0b8867; }
+.blocklist-mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa6ab; }
+.blocklist-mode-toggle.is-active .blocklist-mode-dot { background: #10a981; box-shadow: 0 0 0 3px rgba(16, 169, 129, .12); }
+.blocklist-add-form { display: flex; gap: 8px; max-width: 580px; }
+.blocklist-add-form input { flex: 1; min-width: 0; height: 36px; padding: 0 11px; border: 1px solid #e0e7e6; border-radius: 8px; background: #fff; color: #20333a; font-size: 11px; outline: none; }
+.blocklist-add-form input:focus { border-color: #7bcbb0; box-shadow: 0 0 0 3px rgba(16, 169, 129, .1); }
+.blocklist-add-form input::placeholder { color: #a2adb1; }
+.blocklist-add-form button { padding: 0 14px; border: 1px solid #0d8e6c; border-radius: 8px; background: #0d8e6c; color: #fff; font-size: 10px; font-weight: 700; white-space: nowrap; transition: .16s; }
+.blocklist-add-form button:hover:not(:disabled) { background: #087d60; border-color: #087d60; }
+.blocklist-add-form button:disabled { opacity: .45; cursor: not-allowed; }
+.merchant-blocklist-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.merchant-blocklist-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 5px 6px 5px 10px; border: 1px solid #e3eae8; border-radius: 7px; background: #f7faf9; color: #40565d; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
+.merchant-blocklist-chip button { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #85939a; font-size: 15px; line-height: 1; }
+.merchant-blocklist-chip button:hover { background: #ffecea; color: #c45a4b; }
+.merchant-blocklist-empty, .merchant-blocklist-note { color: #8d9a9f; font-size: 9px; }
+.merchant-blocklist-note { margin: -4px 0 0; }
+
 .alert-banner { display: flex; align-items: center; gap: 10px; border: 1px solid #f3d8bd; background: #fffaf2; border-radius: 9px; padding: 11px 14px; margin-top: 18px; color: #77572d; font-size: 11px; }
 .alert-symbol { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #f6d9ad; color: #825718; font-weight: 800; font-size: 11px; flex: 0 0 auto; }
 .alert-banner button { margin-left: auto; border: 0; background: transparent; color: #835a22; font-size: 10px; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
@@ -245,6 +269,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .hero h1 { font-size: 38px; }
   .hero-copy p { max-width: 340px; }
   .controls-card { margin-top: -20px; flex-wrap: wrap; gap: 13px 19px; padding: 15px 17px; }
+  .merchant-blocklist-panel { padding: 14px 16px; }
   .filter-group { min-width: 105px; }
   .filter-divider { height: 34px; }
   .payment-filter { min-width: 140px; }

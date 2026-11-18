@@ -1,6 +1,8 @@
 import {
+  DEFAULT_BLOCKED_MERCHANTS,
   hasAbaBankPayment,
   INITIAL_MERCHANT_LIMIT,
+  isMerchantBlocked,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
@@ -669,6 +671,7 @@ export async function loadSideQuote(
   exchange: ExchangeId,
   side: P2PSide,
   fiat: FiatCurrency,
+  blockedMerchantNames: readonly string[] = DEFAULT_BLOCKED_MERCHANTS,
 ): Promise<SideQuote> {
   let topOffers: P2POffer[] = [];
   try {
@@ -678,9 +681,12 @@ export async function loadSideQuote(
     for (let page = 1; page <= maxPages; page++) {
       const rows = await readPage(page);
       if (!rows.length) break;
+      // Blocked merchants are dropped before ranking, so the paging loop
+      // keeps looking for eligible replacements instead of counting them.
       const offers = rows
         .map((row) => normalizeOffer(row, exchange, side, fiat))
-        .filter((offer): offer is P2POffer => offer !== null);
+        .filter((offer): offer is P2POffer => offer !== null)
+        .filter((offer) => !isMerchantBlocked(offer, blockedMerchantNames));
       topOffers = selectTopMerchants([...topOffers, ...offers], side, MAX_MERCHANTS_PER_SIDE);
       if (topOffers.length >= INITIAL_MERCHANT_LIMIT) break;
 
