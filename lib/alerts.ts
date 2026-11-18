@@ -38,6 +38,14 @@ function formatPrice(value: number, fiat: FiatCurrency): string {
   return fiat === "USD" ? value.toFixed(4) : Math.round(value).toLocaleString("en-US");
 }
 
+/** e.g. "$2.99 per $1,000 traded" (USD) or "1,234 KHR per 1,000 KHR traded" (KHR). */
+function formatProfitPerThousand(opportunity: ArbitrageOpportunity): string {
+  const { profitPerThousand, fiat } = opportunity;
+  return fiat === "USD"
+    ? `$${profitPerThousand.toFixed(2)} per $1,000 traded`
+    : `${Math.round(profitPerThousand).toLocaleString("en-US")} KHR per 1,000 KHR traded`;
+}
+
 /** Plain-text Telegram message (no parse mode, so merchant names need no escaping). */
 export function formatArbitrageAlert(
   opportunities: readonly ArbitrageOpportunity[],
@@ -55,6 +63,7 @@ export function formatArbitrageAlert(
       `Buy:  ${formatPrice(opportunity.buyPrice, fiat)} ${fiat}/USDT from ${opportunity.buyMerchant}`,
       `Sell: ${formatPrice(opportunity.sellPrice, fiat)} ${fiat}/USDT to ${opportunity.sellMerchant}`,
       `Spread: +${formatPrice(opportunity.spread, fiat)} ${fiat} (+${opportunity.spreadPercent.toFixed(3)}%)`,
+      `Profit: ≈ ${formatProfitPerThousand(opportunity)}`,
       "",
     );
   }

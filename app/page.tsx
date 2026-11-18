@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  arbitrageProfitPerThousand,
   DEFAULT_BLOCKED_MERCHANTS,
   DEFAULT_FIAT,
   EXCHANGES,
@@ -69,6 +70,23 @@ function formatPrice(value: number, fiat: FiatCurrency): string {
     minimumFractionDigits: fiat === "USD" ? 3 : 0,
     maximumFractionDigits: fiat === "USD" ? digits : 2,
   }).format(value);
+}
+
+/** Signed fiat amount for the per-1,000 figure, e.g. "+$2.99" (USD) or "+KHR 5". */
+function formatPerThousand(value: number, fiat: FiatCurrency): string {
+  const sign = value < 0 ? "-" : "+";
+  const amount = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: fiat,
+    minimumFractionDigits: fiat === "USD" ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(value));
+  return `${sign}${amount}`;
+}
+
+/** "1,000 fiat traded" base label matching the selected market. */
+function thousandTradedLabel(fiat: FiatCurrency): string {
+  return fiat === "USD" ? "$1,000 traded" : "1,000 KHR traded";
 }
 
 function formatLimit(value: number, fiat: FiatCurrency): string {
@@ -327,8 +345,8 @@ function ExchangeCard({ exchange, quote, fiat, loading }: { exchange: (typeof EX
           </div>
         </div>
         {quote?.arbitrage?.opportunity ? (
-          <span className="arb-pill" title="Best sell price beats best buy price on this exchange — arbitrage alert threshold reached">
-            ARB +{quote.arbitrage.spreadPercent.toFixed(2)}%
+          <span className="arb-pill" title={`Best sell price beats best buy price on this exchange — arbitrage alert threshold reached (≈ ${formatPerThousand(quote.arbitrage.profitPerThousand, fiat)} profit per ${thousandTradedLabel(fiat)}, before fees)`}>
+            ARB +{quote.arbitrage.spreadPercent.toFixed(2)}% · {formatPerThousand(quote.arbitrage.profitPerThousand, fiat)}/1K
           </span>
         ) : null}
         <span className={`exchange-state ${isLive ? "state-live" : isError ? "state-error" : ""}`}>
@@ -349,12 +367,14 @@ function SummaryCard({
   offer,
   fiat,
   detail,
+  subDetail,
 }: {
   kind: "buy" | "sell" | "spread";
   title: string;
   offer?: P2POffer;
   fiat: FiatCurrency;
   detail?: string | null;
+  subDetail?: string | null;
 }) {
   const icon = kind === "buy" ? "↓" : kind === "sell" ? "↑" : "↔";
   return (
@@ -362,7 +382,7 @@ function SummaryCard({
       <div className="summary-label"><span className="summary-icon">{icon}</span>{title}</div>
       <strong className="summary-value">{offer ? formatPrice(offer.price, fiat) : detail || "—"}</strong>
       <span className="summary-detail">
-        {offer ? <><b>{getExchangeName(offer.exchange)}</b><span className="detail-separator">·</span>{offer.merchantName}</> : kind === "spread" ? "Waiting for both sides" : "No live offers yet"}
+        {offer ? <><b>{getExchangeName(offer.exchange)}</b><span className="detail-separator">·</span>{offer.merchantName}</> : kind === "spread" ? (subDetail ?? "Waiting for both sides") : "No live offers yet"}
       </span>
     </article>
   );
@@ -468,7 +488,7 @@ export default function HomePage() {
     return map;
   }, [visibleQuotes]);
 
-  const { bestBuy, bestSell, spreadValue, spreadPercent, liveSides } = useMemo(() => {
+  const { bestBuy, bestSell, spreadValue, spreadPercent, profitPerThousandValue, liveSides } = useMemo(() => {
     const allBuy = (visibleQuotes?.exchanges ?? []).flatMap((exchange) => exchange.buy.offers);
     const allSell = (visibleQuotes?.exchanges ?? []).flatMap((exchange) => exchange.sell.offers);
     const buy = allBuy.slice().sort((left, right) => left.price - right.price)[0];
@@ -479,6 +499,7 @@ export default function HomePage() {
       bestSell: sell,
       spreadValue: spread,
       spreadPercent: spread !== null && buy && buy.price !== 0 ? (spread / buy.price) * 100 : null,
+      profitPerThousandValue: buy && sell && buy.price > 0 ? arbitrageProfitPerThousand(buy.price, sell.price) : null,
       liveSides: (visibleQuotes?.exchanges ?? []).reduce(
         (total, exchange) => total + Number(exchange.buy.status === "live") + Number(exchange.sell.status === "live"),
         0,
@@ -488,6 +509,9 @@ export default function HomePage() {
 
   const spreadDetail = spreadValue !== null && spreadPercent !== null
     ? `${spreadValue >= 0 ? "+" : ""}${formatPrice(spreadValue, fiat)} · ${spreadPercent.toFixed(2)}%`
+    : null;
+  const spreadSubDetail = profitPerThousandValue !== null
+    ? `≈ ${formatPerThousand(profitPerThousandValue, fiat)} per ${thousandTradedLabel(fiat)}`
     : null;
   const updatedAt = visibleQuotes?.updatedAt ?? null;
 
@@ -588,7 +612,7 @@ export default function HomePage() {
           <div className="summary-grid">
             <SummaryCard kind="buy" title="Best price to buy" offer={bestBuy} fiat={fiat} />
             <SummaryCard kind="sell" title="Best price to sell" offer={bestSell} fiat={fiat} />
-            <SummaryCard kind="spread" title="Buy / sell spread" fiat={fiat} detail={spreadDetail} />
+            <SummaryCard kind="spread" title="Buy / sell spread" fiat={fiat} detail={spreadDetail} subDetail={spreadSubDetail} />
           </div>
         </section>
 
