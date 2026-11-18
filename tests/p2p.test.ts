@@ -231,7 +231,7 @@ test("Binance stops its unfiltered sell lookup on a repeated non-ABA page", asyn
 
   const quote = await loadSideQuote("binance", "sell", "USD");
   assert.deepEqual(requests, [
-    { page: 1, payTypes: ["ABA Bank"] },
+    { page: 1, payTypes: ["ABA"] },
     { page: 1, payTypes: [] },
     { page: 2, payTypes: [] },
   ]);

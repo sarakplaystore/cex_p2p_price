@@ -16,6 +16,27 @@ npm test
 npm run build
 ```
 
+## Arbitrage Telegram alerts
+
+When the best **sell** price on an exchange beats the best **buy** price on the *same* exchange by at least **0.1%** (for example OKX buy $1.000 → sell $1.001), the dashboard sends a Telegram alert naming the exchange, both merchants, and the spread. The exchange card also shows an `ARB` badge. Alerts are checked on every dashboard refresh (every 30 seconds) and via the standalone check endpoint below. A continuing opportunity re-alerts at most once per cooldown (default 15 minutes); if it closes and reappears, it alerts again immediately.
+
+Setup (no alert is sent until these are set):
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
+2. Send any message to your new bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy the `chat.id` value.
+3. In Vercel → your project → Settings → Environment Variables (Production), add:
+   - `TELEGRAM_BOT_TOKEN` — the BotFather token
+   - `TELEGRAM_CHAT_ID` — your chat id
+   - Optional: `ARBITRAGE_MIN_SPREAD_PERCENT` (default `0.1`), `ARBITRAGE_ALERT_COOLDOWN_SECONDS` (default `900`), `ALERTS_CHECK_SECRET` (protects the check endpoint).
+
+To get alerts even when the dashboard is closed, ping the check endpoint every minute with a free scheduler such as [cron-job.org](https://cron-job.org):
+
+```text
+GET https://<your-domain>/api/alerts/check?secret=<ALERTS_CHECK_SECRET>
+```
+
+It checks both USD and KHR markets on all four exchanges and returns a JSON summary (which opportunities were found, whether Telegram is configured, and whether an alert was sent). Add `?force=1` to bypass the cooldown for a manual test.
+
 ## Deploy to Vercel
 
 Import this repository into Vercel and keep the detected **Next.js** framework and default build settings. The `/api/quotes` route calls each exchange's public P2P marketplace endpoint server-side, so the browser does not make cross-origin exchange requests. There are no secrets to configure.
