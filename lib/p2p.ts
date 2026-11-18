@@ -129,6 +129,39 @@ export interface QuotesPayload {
   exchanges: ExchangeQuote[];
 }
 
+export const DEFAULT_BLOCKED_MERCHANTS = [
+  "KingXchanger001",
+  "Localcambodiapayeer",
+] as const;
+export const MAX_BLOCKED_MERCHANTS = 50;
+const MAX_BLOCKED_MERCHANT_NAME_LENGTH = 80;
+
+/** Trim, deduplicate case-insensitively, and bound browser/API blocklist input. */
+export function normalizeBlockedMerchantNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value) {
+    if (typeof candidate !== "string") continue;
+    const name = candidate.trim();
+    if (!name || name.length > MAX_BLOCKED_MERCHANT_NAME_LENGTH) continue;
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+    if (names.length === MAX_BLOCKED_MERCHANTS) break;
+  }
+  return names;
+}
+
+/** Match merchant names exactly, ignoring surrounding spaces and letter case. */
+export function isMerchantBlocked(offer: P2POffer, blockedNames: readonly string[]): boolean {
+  const merchantName = offer.merchantName.trim().toLowerCase();
+  return blockedNames.some((name) => name.trim().toLowerCase() === merchantName);
+}
+
 /** ABA must be a named method, not a substring of a different bank's name. */
 export function hasAbaBankPayment(paymentMethods: readonly string[]): boolean {
   return paymentMethods.some((method) =>
