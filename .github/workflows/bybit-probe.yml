@@ -1,0 +1,52 @@
+name: bybit-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Bybit item/online
+        run: |
+          python3 - << 'PY'
+          import json, urllib.request, urllib.error
+          URL = "https://api2.bybit.com/fiat/otc/item/online"
+          def post(body, label):
+              req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers={
+                  "Content-Type": "application/json", "Accept": "application/json, text/plain, */*",
+                  "Origin": "https://www.bybit.com", "Referer": "https://www.bybit.com/",
+                  "User-Agent": "Mozilla/5.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      payload = json.loads(r.read())
+              except Exception as e:
+                  print(label, "ERROR", repr(e)); return
+              result = payload.get("result") or {}
+              items = result.get("items") or []
+              print(f"== {label}: ret_code={payload.get('ret_code')} ret_msg={payload.get('ret_msg')} count={result.get('count')} items={len(items)}")
+              for it in items[:3]:
+                  print("   ", json.dumps({k: it.get(k) for k in ("id","nickName","price","payments","userId","userMaskId","side","currencyId")}, ensure_ascii=False))
+          base = {"userId":"","tokenId":"USDT","amount":"","authMaker":False,"canTrade":False,"size":"20","page":"1"}
+          for fiat in ("USD","KHR"):
+              for side in ("1","0"):
+                  post({**base,"currencyId":fiat,"side":side,"payment":[]}, f"{fiat} side={side} payment=[]")
+                  post({**base,"currencyId":fiat,"side":side,"payment":["194"]}, f"{fiat} side={side} payment=[194]")
+          # minimal body like other scrapers
+          post({"tokenId":"USDT","currencyId":"KHR","side":"1","size":"20","page":"1","amount":"","payment":[]}, "KHR side=1 minimal")
+          PY
+      - name: Probe Bybit payment list
+        run: |
+          python3 - << 'PY'
+          import json, urllib.request
+          req = urllib.request.Request("https://api2.bybit.com/fiat/otc/configuration/queryAllPaymentList",
+              data=b"{}", headers={"Content-Type":"application/json","Origin":"https://www.bybit.com","Referer":"https://www.bybit.com/","User-Agent":"Mozilla/5.0"})
+          try:
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  raw = r.read(); print("status", r.status, "bytes", len(raw))
+                  payload = json.loads(raw)
+                  conf = (payload.get("result") or {}).get("paymentConfigVo") or []
+                  print("ret_code", payload.get("ret_code"), "methods", len(conf))
+                  for x in conf:
+                      if "aba" in str(x.get("paymentName","")).lower() or "cambodia" in str(x.get("paymentName","")).lower():
+                          print("  ", x.get("paymentType"), x.get("paymentName"))
+          except Exception as e:
+              print("ERROR", repr(e))
+          PY
