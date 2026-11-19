@@ -1,13 +1,15 @@
 import {
   DEFAULT_BLOCKED_MERCHANTS,
+  compileMerchantBlocklist,
   hasAbaBankPayment,
   INITIAL_MERCHANT_LIMIT,
-  isMerchantBlocked,
+  isOfferBlocked,
   MAX_MERCHANTS_PER_SIDE,
   normalizeCompletionRate,
   selectTopMerchants,
   type ExchangeId,
   type FiatCurrency,
+  type MerchantBlocklistInput,
   type P2POffer,
   type P2PSide,
   type SideQuote,
@@ -671,9 +673,14 @@ export async function loadSideQuote(
   exchange: ExchangeId,
   side: P2PSide,
   fiat: FiatCurrency,
-  blockedMerchantNames: readonly string[] = DEFAULT_BLOCKED_MERCHANTS,
+  blockedMerchants: MerchantBlocklistInput = DEFAULT_BLOCKED_MERCHANTS,
 ): Promise<SideQuote> {
   let topOffers: P2POffer[] = [];
+  let hiddenByBlocklist = 0;
+  const countedHiddenAds = new Set<string>();
+  // One compile for the whole paging loop: merchant names match loosely across
+  // exchanges, and each exchange advertiser ID anchor is looked up, not scanned.
+  const blocklist = compileMerchantBlocklist(blockedMerchants);
   try {
     const readPage = await getPageReader(exchange, side, fiat);
     const maxPages = side === "sell" ? MAX_SELL_PAGES : 1;
@@ -681,12 +688,23 @@ export async function loadSideQuote(
     for (let page = 1; page <= maxPages; page++) {
       const rows = await readPage(page);
       if (!rows.length) break;
+      const normalized = rows
+        .map((row) => normalizeOffer(row, exchange, side, fiat))
+        .filter((offer): offer is P2POffer => offer !== null);
       // Blocked merchants are dropped before ranking, so the paging loop
       // keeps looking for eligible replacements instead of counting them.
-      const offers = rows
-        .map((row) => normalizeOffer(row, exchange, side, fiat))
-        .filter((offer): offer is P2POffer => offer !== null)
-        .filter((offer) => !isMerchantBlocked(offer, blockedMerchantNames));
+      // A marketplace that repeats a page must not count the same hidden ad twice.
+      const offers: P2POffer[] = [];
+      for (const offer of normalized) {
+        if (!isOfferBlocked(offer, blocklist)) {
+          offers.push(offer);
+          continue;
+        }
+        if (!countedHiddenAds.has(offer.id)) {
+          countedHiddenAds.add(offer.id);
+          hiddenByBlocklist += 1;
+        }
+      }
       topOffers = selectTopMerchants([...topOffers, ...offers], side, MAX_MERCHANTS_PER_SIDE);
       if (topOffers.length >= INITIAL_MERCHANT_LIMIT) break;
 
@@ -702,6 +720,16 @@ export async function loadSideQuote(
     }
   }
   return topOffers.length
-    ? { status: "live", offers: topOffers }
-    : { status: "empty", offers: [], message: "No verifiable ABA Bank ads found." };
+    ? { status: "live", offers: topOffers, hiddenByBlocklist }
+    : {
+        status: "empty",
+        offers: [],
+        hiddenByBlocklist,
+        // A side that only looks empty because of the blocklist should say so,
+        // rather than implying the exchange has no ABA ads at all.
+        message:
+          hiddenByBlocklist > 0
+            ? `${hiddenByBlocklist} ABA ad${hiddenByBlocklist === 1 ? "" : "s"} ${hiddenByBlocklist === 1 ? "is" : "are"} hidden by your merchant blocklist.`
+            : "No verifiable ABA Bank ads found.",
+      };
 }

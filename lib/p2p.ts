@@ -36,6 +36,8 @@ export interface SideQuote {
   status: QuoteStatus;
   offers: P2POffer[];
   message?: string;
+  /** Ads dropped because their merchant is blocked, so the UI can say so. */
+  hiddenByBlocklist?: number;
 }
 
 export interface ExchangeQuote {
@@ -145,39 +147,350 @@ export interface QuotesPayload {
   updatedAt: string;
   refreshAfterSeconds: number;
   exchanges: ExchangeQuote[];
+  /** Merchant blocklist the server actually applied, for debugging/verification. */
+  blocklist?: { enabled: boolean; merchants: BlockedMerchant[] };
 }
 
 export const DEFAULT_BLOCKED_MERCHANTS = [
   "KingXchanger001",
   "Localcambodiapayeer",
 ] as const;
+/** How many advertisers one browser can block. */
 export const MAX_BLOCKED_MERCHANTS = 50;
+/** Exchange anchors kept with one block, so a rename on one exchange cannot undo it. */
+export const MAX_MERCHANT_IDS_PER_BLOCK = 8;
 const MAX_BLOCKED_MERCHANT_NAME_LENGTH = 80;
+const MAX_MERCHANT_ID_LENGTH = 80;
 
-/** Trim, deduplicate case-insensitively, and bound browser/API blocklist input. */
-export function normalizeBlockedMerchantNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+/**
+ * Rows with no advertiser name fall back to this placeholder. It is shared by
+ * unrelated advertisers, so blocking it would hide the whole market: such ads
+ * can only be blocked by their exchange advertiser ID.
+ */
+const ANONYMOUS_MERCHANT_NAME_KEYS = new Set(["p2pmerchant", "p2pmerchants"]);
 
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of value) {
-    if (typeof candidate !== "string") continue;
-    const name = candidate.trim();
-    if (!name || name.length > MAX_BLOCKED_MERCHANT_NAME_LENGTH) continue;
+/**
+ * Decoration advertisers wrap the same name with on different exchanges
+ * (spaces, dashes, dots, the middot CJK listings use). Only separators are
+ * removed, so letters and digits in any script keep telling names apart.
+ */
+const MERCHANT_NAME_DECORATION = /[\s\-_.,·•°|/\\()[\]{}<>~`!@#$%^&*+=?:;"'’“”]/g;
 
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    names.push(name);
-    if (names.length === MAX_BLOCKED_MERCHANTS) break;
-  }
-  return names;
+/** Separates the exchange from the advertiser ID inside a block anchor. */
+export const MERCHANT_ID_SEPARATOR = ":";
+
+const EXCHANGE_IDS = new Set<string>(EXCHANGES.map((exchange) => exchange.id));
+
+export interface BlockedMerchantId {
+  exchange: ExchangeId;
+  merchantId: string;
 }
 
-/** Match merchant names exactly, ignoring surrounding spaces and letter case. */
-export function isMerchantBlocked(offer: P2POffer, blockedNames: readonly string[]): boolean {
-  const merchantName = offer.merchantName.trim().toLowerCase();
-  return blockedNames.some((name) => name.trim().toLowerCase() === merchantName);
+export interface BlockedMerchant {
+  /** Advertiser name as blocked; "" when only the exchange ID identifies it. */
+  name: string;
+  /** Exchange-scoped advertiser IDs that belong to this same advertiser. */
+  ids: BlockedMerchantId[];
+}
+
+/** What a caller may hand the filter: plain names (legacy shape), full entries, or both. */
+export type MerchantBlocklistInput = readonly (string | BlockedMerchant)[];
+
+/** Compiled once per refresh; `loadSideQuote` filters thousands of rows with it. */
+export interface MerchantBlocklist {
+  merchants: readonly BlockedMerchant[];
+  /** Loose name keys that hide an advertiser on every exchange and both sides. */
+  nameKeys: readonly string[];
+  /** `exchange:id` anchors that hide an advertiser even under a renamed display name. */
+  idKeys: readonly string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asExchangeId(value: unknown): ExchangeId | null {
+  if (typeof value !== "string") return null;
+  const id = value.trim().toLowerCase();
+  return EXCHANGE_IDS.has(id) ? (id as ExchangeId) : null;
+}
+
+function cleanMerchantName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const name = value.trim();
+  // Oversized names are input errors rather than advertisers; drop them whole.
+  return name.length === 0 || name.length > MAX_BLOCKED_MERCHANT_NAME_LENGTH ? "" : name;
+}
+
+/**
+ * Key that survives casing plus spaces and punctuation, so "King-Xchanger.001"
+ * on Binance and "king xchanger 001" on OKX collapse to the same advertiser.
+ */
+export function merchantMatchKey(name: string): string {
+  return name.toLowerCase().replace(MERCHANT_NAME_DECORATION, "");
+}
+
+/** Guard against a blocklist that hides every ad because every key is empty. */
+export function isBlockableMerchantName(name: string): boolean {
+  const key = merchantMatchKey(name);
+  return key.length > 0 && !ANONYMOUS_MERCHANT_NAME_KEYS.has(key);
+}
+
+export function blockedMerchantIdKey(exchange: ExchangeId, merchantId: string): string {
+  return `${exchange}${MERCHANT_ID_SEPARATOR}${merchantId.trim().toLowerCase()}`;
+}
+
+/** `"bybit:123"` or `{ exchange, merchantId }` — both are accepted from clients. */
+function toBlockedMerchantId(value: unknown): BlockedMerchantId | null {
+  if (typeof value === "string") {
+    const separator = value.indexOf(MERCHANT_ID_SEPARATOR);
+    if (separator <= 0) return null;
+    const exchange = asExchangeId(value.slice(0, separator));
+    const merchantId = value.slice(separator + 1).trim().slice(0, MAX_MERCHANT_ID_LENGTH);
+    return exchange && merchantId ? { exchange, merchantId } : null;
+  }
+  if (!isRecord(value)) return null;
+  const exchange = asExchangeId(value.exchange);
+  const rawId = value.merchantId ?? value.id;
+  const merchantId =
+    typeof rawId === "number" && Number.isFinite(rawId)
+      ? String(rawId)
+      : typeof rawId === "string"
+        ? rawId.trim().slice(0, MAX_MERCHANT_ID_LENGTH)
+        : "";
+  return exchange && merchantId ? { exchange, merchantId } : null;
+}
+
+function sameBlockedMerchantId(left: BlockedMerchantId, right: BlockedMerchantId): boolean {
+  return left.exchange === right.exchange && left.merchantId === right.merchantId;
+}
+
+function mergeBlockedMerchantIds(
+  current: readonly BlockedMerchantId[],
+  addition: readonly BlockedMerchantId[],
+): BlockedMerchantId[] {
+  const merged = current.slice();
+  for (const id of addition) {
+    if (merged.length === MAX_MERCHANT_IDS_PER_BLOCK) break;
+    if (!merged.some((existing) => sameBlockedMerchantId(existing, id))) merged.push(id);
+  }
+  return merged;
+}
+
+function toBlockedMerchant(value: unknown): BlockedMerchant | null {
+  if (typeof value === "string") {
+    const name = cleanMerchantName(value);
+    return isBlockableMerchantName(name) ? { name, ids: [] } : null;
+  }
+  if (!isRecord(value)) return null;
+
+  const name = cleanMerchantName(value.name ?? value.merchantName);
+  const ids: BlockedMerchantId[] = [];
+  // Copied, so the caller's own array is never written to.
+  const candidates = [
+    ...(Array.isArray(value.ids) ? value.ids : Array.isArray(value.merchantIds) ? value.merchantIds : []),
+    // A flat { name, exchange, merchantId } is exactly what an offer card has.
+    toBlockedMerchantId({ exchange: value.exchange, merchantId: value.merchantId }),
+  ];
+
+  for (const candidate of candidates) {
+    if (ids.length === MAX_MERCHANT_IDS_PER_BLOCK) break;
+    const id = toBlockedMerchantId(candidate);
+    if (id && !ids.some((existing) => sameBlockedMerchantId(existing, id))) ids.push(id);
+  }
+  if (!ids.length && !isBlockableMerchantName(name)) return null;
+  return { name, ids };
+}
+
+/**
+ * Insert one block, extending the entry that already covers it — matched by
+ * loose name key or by a shared exchange advertiser ID — so blocking the same
+ * merchant on a second exchange never leaves two chips behind.
+ */
+function appendBlockedMerchant(
+  merchants: readonly BlockedMerchant[],
+  addition: BlockedMerchant,
+): BlockedMerchant[] {
+  const nameKey = merchantMatchKey(addition.name);
+  const additionIds = addition.ids.map((id) => blockedMerchantIdKey(id.exchange, id.merchantId));
+  const merged: BlockedMerchant[] = [];
+  let absorbed = false;
+
+  for (const merchant of merchants) {
+    const overlaps =
+      (nameKey !== "" && merchantMatchKey(merchant.name) === nameKey) ||
+      merchant.ids.some((id) => additionIds.includes(blockedMerchantIdKey(id.exchange, id.merchantId)));
+    if (!overlaps) {
+      merged.push(merchant);
+      continue;
+    }
+    // Collapse further duplicates of that entry instead of adding more copies.
+    if (absorbed) continue;
+    merged.push({
+      name: merchant.name || addition.name,
+      ids: mergeBlockedMerchantIds(merchant.ids, addition.ids),
+    });
+    absorbed = true;
+  }
+
+  if (!absorbed) merged.push({ name: addition.name, ids: addition.ids.slice(0, MAX_MERCHANT_IDS_PER_BLOCK) });
+  return merged.slice(0, MAX_BLOCKED_MERCHANTS);
+}
+
+/** Trim, merge, and bound a browser/API blocklist of names and `{ name, ids }` entries. */
+export function normalizeBlockedMerchants(value: unknown): BlockedMerchant[] {
+  const source = isRecord(value) ? (Array.isArray(value.merchants) ? value.merchants : value.names) : value;
+  if (!Array.isArray(source)) return [];
+
+  let merchants: BlockedMerchant[] = [];
+  for (const candidate of source) {
+    const entry = toBlockedMerchant(candidate);
+    if (!entry) continue;
+    merchants = appendBlockedMerchant(merchants, entry);
+    if (merchants.length === MAX_BLOCKED_MERCHANTS) break;
+  }
+  return merchants;
+}
+
+/** Names only, for legacy callers and storage that predates ID anchors. */
+export function normalizeBlockedMerchantNames(value: unknown): string[] {
+  return normalizeBlockedMerchants(value)
+    .map((merchant) => merchant.name)
+    .filter((name) => name.length > 0);
+}
+
+export function compileMerchantBlocklist(blocked: MerchantBlocklistInput | null | undefined): MerchantBlocklist {
+  const merchants = normalizeBlockedMerchants(blocked);
+  const nameKeys: string[] = [];
+  const idKeys: string[] = [];
+
+  for (const merchant of merchants) {
+    if (isBlockableMerchantName(merchant.name)) {
+      const key = merchantMatchKey(merchant.name);
+      if (!nameKeys.includes(key)) nameKeys.push(key);
+    }
+    for (const id of merchant.ids) {
+      const idKey = blockedMerchantIdKey(id.exchange, id.merchantId);
+      if (!idKeys.includes(idKey)) idKeys.push(idKey);
+    }
+  }
+
+  return { merchants, nameKeys, idKeys };
+}
+
+/** Accepts an already compiled list, or the raw name/entry arrays to compile. */
+function toCompiledBlocklist(
+  blocked: MerchantBlocklist | MerchantBlocklistInput | null | undefined,
+): MerchantBlocklist {
+  if (blocked && !Array.isArray(blocked) && Array.isArray((blocked as MerchantBlocklist).nameKeys)) {
+    return blocked as MerchantBlocklist;
+  }
+  return compileMerchantBlocklist(blocked as MerchantBlocklistInput | null | undefined);
+}
+
+/** True when nothing is blocked, so callers can skip filtering entirely. */
+export function merchantBlocklistIsEmpty(blocked: MerchantBlocklist | MerchantBlocklistInput): boolean {
+  const blocklist = toCompiledBlocklist(blocked);
+  return blocklist.nameKeys.length === 0 && blocklist.idKeys.length === 0;
+}
+
+/**
+ * A block applies on every exchange, side, and fiat market: names match loosely
+ * across exchanges, and an exchange advertiser ID always wins on its own exchange.
+ */
+export function isOfferBlocked(offer: P2POffer, blocklist: MerchantBlocklist): boolean {
+  if (blocklist.nameKeys.length === 0 && blocklist.idKeys.length === 0) return false;
+
+  const nameKey = merchantMatchKey(offer.merchantName.trim());
+  if (nameKey !== "" && blocklist.nameKeys.includes(nameKey)) return true;
+
+  const merchantId = offer.merchantId?.trim();
+  if (merchantId && blocklist.idKeys.includes(blockedMerchantIdKey(offer.exchange, merchantId))) return true;
+
+  return false;
+}
+
+/** Convenience wrapper that compiles per call; loops should use `compileMerchantBlocklist`. */
+export function isMerchantBlocked(
+  offer: P2POffer,
+  blocked: MerchantBlocklistInput | MerchantBlocklist | null | undefined,
+): boolean {
+  return isOfferBlocked(offer, toCompiledBlocklist(blocked));
+}
+
+/** Stable key for one blocked entry, used to remove a chip. */
+export function blockedMerchantKey(merchant: BlockedMerchant): string {
+  if (isBlockableMerchantName(merchant.name)) return `name:${merchantMatchKey(merchant.name)}`;
+  const ids = merchant.ids.map((id) => blockedMerchantIdKey(id.exchange, id.merchantId)).sort().join(",");
+  return ids ? `ids:${ids}` : "";
+}
+
+export function findBlockedMerchant(
+  merchants: readonly BlockedMerchant[],
+  name: string,
+): BlockedMerchant | null {
+  if (!isBlockableMerchantName(name)) return null;
+  const key = merchantMatchKey(name);
+  return merchants.find((merchant) => merchantMatchKey(merchant.name) === key) ?? null;
+}
+
+/** The entry that hides this offer, so a card's button can undo exactly that block. */
+export function findBlockingMerchant(
+  offer: P2POffer,
+  merchants: readonly BlockedMerchant[],
+): BlockedMerchant | null {
+  const nameKey = merchantMatchKey(offer.merchantName.trim());
+  const idKey = offer.merchantId ? blockedMerchantIdKey(offer.exchange, offer.merchantId) : "";
+
+  return (
+    merchants.find((merchant) => {
+      if (idKey && merchant.ids.some((id) => blockedMerchantIdKey(id.exchange, id.merchantId) === idKey)) {
+        return true;
+      }
+      return nameKey !== "" && isBlockableMerchantName(merchant.name) && merchantMatchKey(merchant.name) === nameKey;
+    }) ?? null
+  );
+}
+
+export function removeBlockedMerchant(
+  merchants: readonly BlockedMerchant[],
+  key: string,
+): BlockedMerchant[] {
+  // An entry with no name and no IDs cannot be addressed, so nothing to remove.
+  if (!key) return merchants.slice();
+  return merchants.filter((merchant) => blockedMerchantKey(merchant) !== key);
+}
+
+/** Merge a fresh block into a saved list (what the per-card Block button does). */
+export function mergeBlockedMerchant(
+  merchants: readonly BlockedMerchant[],
+  addition: BlockedMerchant,
+): BlockedMerchant[] {
+  return appendBlockedMerchant(merchants, addition);
+}
+
+/**
+ * The block to offer on one ad: its advertiser ID plus its display name when
+ * that name identifies an advertiser rather than the anonymous fallback.
+ */
+export function blockedMerchantFromOffer(offer: P2POffer): BlockedMerchant | null {
+  const name = cleanMerchantName(offer.merchantName);
+  const blockableName = isBlockableMerchantName(name) ? name : "";
+  const id = toBlockedMerchantId({ exchange: offer.exchange, merchantId: offer.merchantId });
+  const ids = id ? [id] : [];
+  if (!blockableName && !ids.length) return null;
+  return { name: blockableName, ids };
+}
+
+/** Chip label: the blocked name, or the exchange advertiser ID behind it. */
+export function blockedMerchantLabel(
+  merchant: BlockedMerchant,
+  exchangeNames: Partial<Record<ExchangeId, string>> = {},
+): string {
+  if (merchant.name) return merchant.name;
+  return merchant.ids
+    .map((id) => `${exchangeNames[id.exchange] ?? id.exchange} advertiser ${id.merchantId}`)
+    .join(", ");
 }
 
 /** ABA must be a named method, not a substring of a different bank's name. */
