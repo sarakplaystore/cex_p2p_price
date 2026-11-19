@@ -1,12 +1,13 @@
 import { NextResponse, after } from "next/server";
 import { getArbitrageAlertConfig, notifyArbitrageOpportunities } from "@/lib/alerts";
+import { readBlocklistSettings, readMerchantBlocklistCookie, type MerchantBlocklistSettings } from "@/lib/blocklist";
 import { loadSideQuote } from "@/lib/exchanges";
 import {
   DEFAULT_BLOCKED_MERCHANTS,
   DEFAULT_FIAT,
   EXCHANGES,
   exchangeSpread,
-  normalizeBlockedMerchantNames,
+  normalizeBlockedMerchants,
   type ExchangeQuote,
   type FiatCurrency,
   type QuotesPayload,
@@ -22,7 +23,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function createQuotesResponse(requestedFiatValue: unknown, blockedMerchantNamesValue: unknown) {
+function blocklistError(message: string) {
+  return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE_HEADERS });
+}
+
+/** The built-in list applies when neither the request nor the browser cookie carries one. */
+function defaultBlocklist(): MerchantBlocklistSettings {
+  return { enabled: true, merchants: normalizeBlockedMerchants(DEFAULT_BLOCKED_MERCHANTS) };
+}
+
+/**
+ * A caller may send a plain list of merchant names (the shape the dashboard has
+ * always posted) or a full `{ enabled, merchants }` blocklist.
+ */
+function toBlocklistSettings(value: unknown): MerchantBlocklistSettings {
+  if (isRecord(value) && (value.enabled !== undefined || value.merchants !== undefined || value.names !== undefined)) {
+    const settings = readBlocklistSettings(value);
+    if (settings) return settings;
+  }
+  return { enabled: true, merchants: normalizeBlockedMerchants(value) };
+}
+
+/**
+ * Precedence: the blocklist in this request, then the one saved in the browser
+ * cookie, then the built-in defaults. The list is applied server-side before
+ * ranking so the paging loop can pull an eligible merchant to replace a
+ * blocked one, on every exchange, both sides, and both fiat markets.
+ */
+function resolveBlocklist(request: Request, explicit: unknown): MerchantBlocklistSettings {
+  if (explicit !== undefined) return toBlocklistSettings(explicit);
+  return readMerchantBlocklistCookie(request.headers.get("cookie")) ?? defaultBlocklist();
+}
+
+async function createQuotesResponse(requestedFiatValue: unknown, blocklist: MerchantBlocklistSettings) {
   const requestedFiat =
     typeof requestedFiatValue === "string" ? requestedFiatValue.toUpperCase() : DEFAULT_FIAT;
 
@@ -34,13 +67,13 @@ async function createQuotesResponse(requestedFiatValue: unknown, blockedMerchant
   }
 
   const fiat = requestedFiat as FiatCurrency;
-  const blockedMerchantNames = normalizeBlockedMerchantNames(blockedMerchantNamesValue);
+  const blockedMerchants = blocklist.enabled ? blocklist.merchants : [];
   const alertConfig = getArbitrageAlertConfig();
   const exchangeQuotes: ExchangeQuote[] = await Promise.all(
     EXCHANGES.map(async ({ id }) => {
       const [buy, sell] = await Promise.all([
-        loadSideQuote(id, "buy", fiat, blockedMerchantNames),
-        loadSideQuote(id, "sell", fiat, blockedMerchantNames),
+        loadSideQuote(id, "buy", fiat, blockedMerchants),
+        loadSideQuote(id, "sell", fiat, blockedMerchants),
       ]);
       return { id, buy, sell };
     }),
@@ -60,6 +93,7 @@ async function createQuotesResponse(requestedFiatValue: unknown, blockedMerchant
     updatedAt: new Date().toISOString(),
     refreshAfterSeconds: 30,
     exchanges: exchangeQuotes,
+    blocklist: { enabled: blocklist.enabled, merchants: blockedMerchants },
   };
 
   // Alert as soon as an opportunity is seen on a refresh, without delaying
@@ -78,26 +112,21 @@ async function createQuotesResponse(requestedFiatValue: unknown, blockedMerchant
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const blockedParam = searchParams.get("blocked");
-  let blockedMerchantNames: unknown = DEFAULT_BLOCKED_MERCHANTS;
 
   if (blockedParam !== null) {
+    let parsed: unknown;
     try {
-      blockedMerchantNames = JSON.parse(blockedParam) as unknown;
+      parsed = JSON.parse(blockedParam) as unknown;
     } catch {
-      return NextResponse.json(
-        { error: "The blocked merchant list must be valid JSON." },
-        { status: 400, headers: NO_STORE_HEADERS },
-      );
+      return blocklistError("The blocked merchant list must be valid JSON.");
     }
-    if (!Array.isArray(blockedMerchantNames)) {
-      return NextResponse.json(
-        { error: "The blocked merchant list must be an array." },
-        { status: 400, headers: NO_STORE_HEADERS },
-      );
+    if (!Array.isArray(parsed) && !isRecord(parsed)) {
+      return blocklistError("The blocked merchant list must be an array.");
     }
+    return createQuotesResponse(searchParams.get("fiat"), toBlocklistSettings(parsed));
   }
 
-  return createQuotesResponse(searchParams.get("fiat"), blockedMerchantNames);
+  return createQuotesResponse(searchParams.get("fiat"), resolveBlocklist(request, undefined));
 }
 
 export async function POST(request: Request) {
@@ -105,26 +134,22 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON." },
-      { status: 400, headers: NO_STORE_HEADERS },
-    );
+    return blocklistError("Request body must be valid JSON.");
   }
 
   if (!isRecord(body)) {
-    return NextResponse.json(
-      { error: "Request body must be an object." },
-      { status: 400, headers: NO_STORE_HEADERS },
-    );
+    return blocklistError("Request body must be an object.");
   }
 
-  const blockedMerchantNames = body.blockedMerchants ?? DEFAULT_BLOCKED_MERCHANTS;
-  if (!Array.isArray(blockedMerchantNames)) {
-    return NextResponse.json(
-      { error: "blockedMerchants must be an array." },
-      { status: 400, headers: NO_STORE_HEADERS },
-    );
+  // `blocklist` carries the enabled flag; `blockedMerchants` is the older
+  // name-only list, which always means "blocking is on".
+  const explicit = body.blocklist ?? body.blockedMerchants;
+  if (body.blockedMerchants !== undefined && !Array.isArray(body.blockedMerchants)) {
+    return blocklistError("blockedMerchants must be an array.");
   }
 
-  return createQuotesResponse(body.fiat, blockedMerchantNames);
+  return createQuotesResponse(
+    body.fiat,
+    explicit === undefined ? resolveBlocklist(request, undefined) : toBlocklistSettings(explicit),
+  );
 }

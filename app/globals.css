@@ -135,6 +135,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .merchant-blocklist-chip button:hover { background: #ffecea; color: #c45a4b; }
 .merchant-blocklist-empty, .merchant-blocklist-note { color: #8d9a9f; font-size: 9px; }
 .merchant-blocklist-note { margin: -4px 0 0; }
+.merchant-blocklist-warning { margin: -6px 0 0; padding: 8px 10px; border: 1px solid #f3ddc6; border-radius: 8px; background: #fffaf2; color: #7d5a26; font-size: 9px; line-height: 1.5; }
+.blocklist-chip-ids { display: inline-flex; align-items: center; flex: 0 0 auto; height: 15px; padding: 0 5px; border-radius: 4px; background: #eaf3f0; color: #4d7266; font-size: 8px; font-weight: 700; letter-spacing: .02em; cursor: help; }
 
 .alert-banner { display: flex; align-items: center; gap: 10px; border: 1px solid #f3d8bd; background: #fffaf2; border-radius: 9px; padding: 11px 14px; margin-top: 18px; color: #77572d; font-size: 11px; }
 .alert-symbol { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #f6d9ad; color: #825718; font-weight: 800; font-size: 11px; flex: 0 0 auto; }
@@ -209,6 +211,13 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
 .merchant-title { min-width: 0; display: flex; align-items: center; gap: 5px; }
 .merchant-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 19px; height: 19px; border-radius: 6px; color: #357969; background: #e8f3ef; font-size: 8px; font-weight: 800; }
 .merchant-name { overflow: hidden; color: #4a5e64; font-size: 8px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.offer-card-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; }
+.offer-block-button { display: grid; place-items: center; width: 16px; height: 16px; flex: 0 0 auto; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #b6c1c4; transition: .16s ease; }
+.offer-block-button:hover { border-color: #f0cdc5; background: #fff1ee; color: #c4574a; }
+.offer-block-button.is-blocked { border-color: #f0cdc5; background: #ffeae5; color: #c4574a; }
+.block-icon { width: 11px; height: 11px; }
+.blocklist-hidden-note { display: flex; align-items: center; gap: 4px; margin: 6px 0 0; padding: 4px 6px; border: 1px solid #f5e4c9; border-radius: 6px; background: #fff9f0; color: #96733d; font-size: 7px; font-weight: 700; }
+.blocklist-hidden-note .block-icon { width: 9px; height: 9px; }
 .best-pill, .rank-pill { flex: 0 0 auto; border-radius: 4px; padding: 3px 4px; font-size: 6px; font-weight: 800; letter-spacing: .05em; }
 .best-pill { color: #07815e; background: #e3f5ed; }
 .rank-pill { color: #9ba6a9; background: #f0f3f3; }
@@ -323,6 +332,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(16, 169, 129, .3
   .offer-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .offer-card { padding: 10px; }
   .merchant-name { font-size: 9px; }
+  .offer-block-button { width: 22px; height: 22px; }
+  .offer-block-button .block-icon { width: 13px; height: 13px; }
   .offer-price-line strong { font-size: 15px; }
   .limit-value { font-size: 8px; }
   .empty-state { height: 140px; }
